@@ -1,0 +1,102 @@
+# CIS Cluster 运维工具配置文件
+# 格式：TOML 1.0；文件名固定为 conf，必须与 cis_cluster_ops.py 或打包后的 exe 同目录。
+# Windows 路径使用单引号，避免反斜杠转义。
+
+[general]
+# 要管理的根目录。工具只枚举该目录下的直接子目录，忽略根目录中的普通文件。
+manage_dir = 'C:\Users\corwin\Desktop\cis-cluster'
+
+# 默认 Java 路径：既可以填写 bin 目录，也可以直接填写 java.exe。
+java_path = 'D:\DevApp\java\jdk8u392-full\bin'
+
+# 默认 JVM 堆内存；应用可在自己的 [[apps]] 段中覆盖。
+min_memory = '64m'
+max_memory = '128m'
+
+# 每个应用目录中的 PID 文件名模板，必须包含 {app}。
+pid_file = '{app}.pid'
+
+# taskkill 普通停止的等待时间；超时后使用 /F 强制停止。
+stop_timeout_seconds = 15
+force_kill_timeout_seconds = 5
+
+# 启动后等待多少秒再判断 Java 是否立即退出。
+start_check_seconds = 2
+
+# 日志目录，相对于每个应用目录。标准输出和错误输出分别写入：
+# logs\console.out.log、logs\console.err.log
+log_dir = 'logs'
+
+[commands]
+# 菜单快捷键可修改，但每项必须是唯一的单个字符。
+update = 'A'
+stop = 'S'
+start = 'D'
+restart = 'F'
+quit = 'Q'
+refresh = 'X'
+
+# 每个 [[apps]] 对应 manage_dir 下的一个同名文件夹。
+# jar_name 省略时默认为“应用名.jar”。
+# java_path、min_memory、max_memory 可按应用独立覆盖。
+# 启动命令固定为：java.exe -Xms... -Xmx... -Dfile.encoding=utf-8 -jar 应用.jar
+#                  --spring.config.location=file:./application.yml,file:./bootstrap.yaml
+
+[[apps]]
+name = 'agent'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-agent\witlink-app-agent\target\agent.jar'
+
+[[apps]]
+name = 'crm'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-crm\witlink-app-crm\target\crm.jar'
+
+[[apps]]
+name = 'masset'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-masset\witlink-app-masset\target\masset.jar'
+
+[[apps]]
+name = 'message'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-message\witlink-app-message\target\message.jar'
+
+[[apps]]
+name = 'pay'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-pay\witlink-app-pay\target\pay.jar'
+
+[[apps]]
+name = 'prepay'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-prepay\witlink-app-prepay\target\prepay.jar'
+
+[[apps]]
+name = 'postpay'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-postpay\witlink-app-postpay\target\postpay.jar'
+
+[[apps]]
+name = 'sts'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-sts\witlink-app-sts\target\sts.jar'
+
+[[apps]]
+name = 'system'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-system\witlink-app-system\target\system.jar'
+
+[[apps]]
+name = 'tariff'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-tariff\witlink-app-tariff\target\tariff.jar'
+
+[[apps]]
+name = 'workorder'
+source_jar = 'D:\Gitlab\cis\witlink-cis-service\witlink-cis-workorder\witlink-app-workorder\target\workorder.jar'
+
+[[apps]]
+name = 'gateway'
+source_jar = 'D:\Gitlab\cis\witlink-platform-usercenter\witlink-platform-gateway\target\gateway.jar'
+
+[[apps]]
+name = 'usercenter'
+# source_jar = 'D:\Gitlab\cis\witlink-platform-usercenter\witlink-platform-usercenter\witlink-app-usercenter\target\usercenter.jar'
+source_jar = 'D:\Gitlab\cis\witlink-platform-usercenter\witlink-platform-usercenter\witlink-platform-usercenter-app\target\usercenter.jar'
+
+# 单应用覆盖示例（取消注释并放入对应 [[apps]] 段）：
+# jar_name = 'custom-name.jar'
+# java_path = 'D:\DevApp\java\jdk8u392-full\bin\java.exe'
+# min_memory = '256m'
+# max_memory = '1g'

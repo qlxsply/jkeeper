@@ -1,0 +1,159 @@
+import { VerticalBox, HorizontalBox, Button, CheckBox, ScrollView } from "std-widgets.slint";
+
+export struct Service {
+    name: string,
+    pid: string,
+    started: string,
+    memory: string,
+    ports: string,
+    jar-time: string,
+    running: bool,
+    uncertain: bool,
+    problem: bool,
+    selected: bool,
+    can-start: bool,
+    can-update: bool,
+    can-restart: bool,
+}
+
+component ActionCell inherits VerticalBox {
+    in property <string> label;
+    in property <bool> enabled: true;
+    callback clicked();
+    width: 48px;
+    height: 44px;
+    padding: 0px;
+    alignment: center;
+    Button {
+        text: root.label;
+        width: 48px;
+        height: 32px;
+        enabled: root.enabled;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "CIS Cluster Manager";
+    preferred-width: 1400px;
+    preferred-height: 850px;
+    min-width: 1080px;
+    min-height: 550px;
+    background: #161b23;
+
+    in property <[Service]> services;
+    in property <string> directory;
+    in property <string> status;
+    in property <string> records;
+    in property <bool> busy;
+    in property <bool> enabled: true;
+    in property <bool> bulk-start;
+    in property <bool> bulk-stop;
+    in property <bool> bulk-restart;
+    in property <bool> bulk-update;
+    in property <bool> all-selected;
+
+    callback dispatch-events();
+    callback select(int, bool);
+    callback select-all(bool);
+    callback action(int, string);
+    callback bulk(string);
+    callback refresh();
+
+    VerticalBox {
+        padding: 20px;
+        spacing: 8px;
+
+        Text {
+            height: 18px;
+            text: root.directory;
+            color: #8290a4;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        HorizontalBox {
+            padding: 0px;
+            height: 34px;
+            spacing: 6px;
+            Button { text: "启动选中"; width: 88px; height: 32px; enabled: root.enabled && !root.busy && root.bulk-start; clicked => { root.bulk("start"); } }
+            Button { text: "停止选中"; width: 88px; height: 32px; enabled: root.enabled && !root.busy && root.bulk-stop; clicked => { root.bulk("stop"); } }
+            Button { text: "重启选中"; width: 88px; height: 32px; enabled: root.enabled && !root.busy && root.bulk-restart; clicked => { root.bulk("restart"); } }
+            Button { text: "更新选中"; width: 88px; height: 32px; enabled: root.enabled && !root.busy && root.bulk-update; clicked => { root.bulk("update"); } }
+            Button { text: "刷新"; width: 48px; height: 32px; enabled: root.enabled; clicked => { root.refresh(); } }
+        }
+
+        HorizontalBox {
+            padding-left: 5px;
+            padding-right: 5px;
+            spacing: 8px;
+            height: 40px;
+            CheckBox {
+                width: 26px;
+                checked: root.all-selected;
+                enabled: root.enabled && !root.busy;
+                toggled => { root.select-all(self.checked); }
+            }
+            Text { width: 100px; text: "应用名称"; color: #8290a4; vertical-alignment: center; }
+            Text { width: 58px; text: "PID"; color: #8290a4; vertical-alignment: center; }
+            Text { width: 145px; text: "启动时间"; color: #8290a4; vertical-alignment: center; }
+            Text { width: 175px; text: "JVM 最小 / 实际 / 最大"; color: #8290a4; vertical-alignment: center; }
+            Text { width: 145px; text: "JAR 更新时间"; color: #8290a4; vertical-alignment: center; }
+            Text { text: "监听端口"; color: #8290a4; min-width: 65px; horizontal-stretch: 1; vertical-alignment: center; }
+            Text { width: 272px; text: "操作"; color: #8290a4; vertical-alignment: center; }
+        }
+
+        ScrollView {
+            vertical-stretch: 1;
+            VerticalBox {
+                spacing: 1px;
+                padding: 0px;
+                for s[i] in root.services: Rectangle {
+                    height: 44px;
+                    background: s.selected ? #26364b : #1b222c;
+                    HorizontalBox {
+                        padding: 0px;
+                        spacing: 8px;
+                        CheckBox {
+                            width: 26px;
+                            checked: s.selected;
+                            enabled: !root.busy;
+                            toggled => { root.select(i, self.checked); }
+                        }
+                        Text { width: 100px; text: s.name; color: s.uncertain || s.problem ? #f0757d : s.running ? #48ce99 : #eaf0f8; overflow: elide; vertical-alignment: center; }
+                        Text { width: 58px; text: s.pid; color: #dbe3ee; vertical-alignment: center; }
+                        Text { width: 145px; text: s.started; color: #dbe3ee; font-size: 11px; vertical-alignment: center; }
+                        Text { width: 175px; text: s.memory; color: #9fbff7; font-size: 12px; vertical-alignment: center; }
+                        Text { width: 145px; text: s.jar-time; color: #dbe3ee; font-size: 11px; vertical-alignment: center; }
+                        Text { text: s.ports; color: #dbe3ee; overflow: elide; min-width: 65px; horizontal-stretch: 1; vertical-alignment: center; }
+                        ActionCell { label: "启动"; enabled: root.enabled && !root.busy && s.can-start; clicked => { root.action(i, "start"); } }
+                        ActionCell { label: "停止"; enabled: root.enabled && !root.busy && s.running && !s.uncertain; clicked => { root.action(i, "stop"); } }
+                        ActionCell { label: "重启"; enabled: root.enabled && !root.busy && s.can-restart; clicked => { root.action(i, "restart"); } }
+                        ActionCell { label: "更新"; enabled: root.enabled && !root.busy && s.can-update; clicked => { root.action(i, "update"); } }
+                        ActionCell { label: "日志"; enabled: root.enabled; clicked => { root.action(i, "log"); } }
+                    }
+                }
+            }
+        }
+
+        Text { height: 18px; text: "操作记录"; color: #eaf0f8; vertical-alignment: center; }
+        Rectangle {
+            height: 110px;
+            background: #11151c;
+            ScrollView {
+                VerticalBox {
+                    alignment: start;
+                    padding: 8px;
+                    Text { text: root.records; color: #aabbd0; font-size: 12px; wrap: word-wrap; horizontal-alignment: left; vertical-alignment: top; }
+                }
+            }
+        }
+        Text {
+            height: 22px;
+            text: root.status;
+            color: #dbe3ee;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+    }
+}
