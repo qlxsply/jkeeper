@@ -1,6 +1,6 @@
 use crate::{
     AppWindow, Service,
-    config::Config,
+    config::{App as AppConfig, Config},
     manager::{self, Status},
     process,
 };
@@ -19,7 +19,7 @@ use std::{
 
 enum Event {
     Snapshot(Vec<Status>),
-    Record(String),
+    Status(String),
     Done,
 }
 #[derive(Clone)]
@@ -41,10 +41,50 @@ struct View {
     selected: HashSet<usize>,
     busy: Arc<AtomicBool>,
     closing: bool,
-    records: Vec<String>,
     rows: Rc<VecModel<Service>>,
     first_snapshot: bool,
     scan_error: bool,
+    detail_index: Option<usize>,
+}
+fn service_model(app: &AppConfig, status: &Status, selected: bool) -> Service {
+    let command_lines = status
+        .command_line
+        .lines()
+        .map(|line| line.chars().count().max(1).div_ceil(84))
+        .sum::<usize>()
+        .max(1) as i32;
+    Service {
+        name: app.name.clone().into(),
+        pid: status
+            .identity
+            .as_ref()
+            .map(|p| p.pid.to_string())
+            .unwrap_or_else(|| "—".into())
+            .into(),
+        current_memory: status
+            .current_memory
+            .clone()
+            .unwrap_or_else(|| "—".into())
+            .into(),
+        ports_summary: crate::port_format::table_summary(&status.ports).into(),
+        ports_count: status.ports.len() as i32,
+        command_lines,
+        ports_full: if status.ports.is_empty() {
+            "—".into()
+        } else {
+            status.ports.join("\n").into()
+        },
+        started: status.started.clone().into(),
+        jar_time: status.jar_time.clone().into(),
+        command_line: status.command_line.clone().into(),
+        running: status.identity.is_some(),
+        uncertain: status.uncertain,
+        problem: !status.note.is_empty(),
+        selected,
+        can_start: status.can_start,
+        can_update: status.can_update,
+        can_restart: status.can_restart,
+    }
 }
 impl View {
     fn render(&mut self, ui: &AppWindow) {
@@ -53,30 +93,7 @@ impl View {
             .apps
             .iter()
             .enumerate()
-            .map(|(i, _)| {
-                let a = &self.config.apps[i];
-                let s = &self.statuses[i];
-                Service {
-                    name: a.name.clone().into(),
-                    pid: s
-                        .identity
-                        .as_ref()
-                        .map(|p| p.pid.to_string())
-                        .unwrap_or_else(|| "—".into())
-                        .into(),
-                    started: s.started.clone().into(),
-                    memory: s.memory.clone().into(),
-                    ports: s.ports.clone().into(),
-                    jar_time: s.jar_time.clone().into(),
-                    running: s.identity.is_some(),
-                    uncertain: s.uncertain,
-                    problem: !s.note.is_empty(),
-                    selected: self.selected.contains(&i),
-                    can_start: s.can_start,
-                    can_update: s.can_update,
-                    can_restart: s.can_restart,
-                }
-            })
+            .map(|(i, a)| service_model(a, &self.statuses[i], self.selected.contains(&i)))
             .collect();
         if self.rows.row_count() != rows.len() {
             self.rows.set_vec(rows);
@@ -99,13 +116,15 @@ impl View {
         ui.set_all_selected(
             !self.config.apps.is_empty() && self.selected.len() == self.config.apps.len(),
         );
+        if let Some(index) = self.detail_index {
+            ui.set_detail_service(service_model(
+                &self.config.apps[index],
+                &self.statuses[index],
+                false,
+            ));
+        }
     }
-    fn record(&mut self, ui: &AppWindow, text: String) {
-        let line = format!("{}  {}", chrono::Local::now().format("%H:%M:%S"), text);
-        tracing::info!("{text}");
-        self.records.insert(0, line);
-        self.records.truncate(100);
-        ui.set_records(self.records.join("\n").into());
+    fn set_status(&mut self, ui: &AppWindow, text: String) {
         ui.set_status(if self.closing {
             "当前任务完成后退出".into()
         } else {
@@ -126,7 +145,7 @@ fn submit(
     wake: mpsc::SyncSender<()>,
 ) {
     if indices.is_empty() {
-        view.borrow_mut().record(ui, "请先选择应用".into());
+        view.borrow_mut().set_status(ui, "请先选择应用".into());
         return;
     }
     let mut v = view.borrow_mut();
@@ -134,7 +153,7 @@ fn submit(
         return;
     }
     let c = v.config.clone();
-    v.record(ui, format!("开始执行 {action}"));
+    v.set_status(ui, format!("开始执行 {action}"));
     v.render(ui);
     drop(v);
     let fallback = tx.clone();
@@ -144,41 +163,24 @@ fn submit(
             let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 crate::scheduler::run_batch(
                     indices,
-                    |index| {
-                        let snapshot = manager::scan(&c);
-                        let s = &snapshot[index];
-                        let skip = match action.as_str() {
-                            "start" => s.identity.is_some() && !s.uncertain,
-                            "stop" => s.identity.is_none() && !s.uncertain,
-                            "update" => s.identity.is_some() && !s.uncertain,
-                            _ => false,
-                        };
-                        if skip {
-                            return Ok("跳过不适用操作".into());
-                        }
-                        let _ = tx.send(Event::Record(format!(
-                            "{}：正在执行 {action}",
-                            c.apps[index].name
-                        )));
-                        manager::execute(&c, index, &action)
-                    },
+                    |index| manager::execute(&c, index, &action),
                     |index, result| {
                         let text = match result {
                             Ok(s) => s,
                             Err(e) => format!("失败：{e}"),
                         };
-                        let _ = tx.send(Event::Record(format!("{}：{text}", c.apps[index].name)));
+                        let _ = tx.send(Event::Status(format!("{}：{text}", c.apps[index].name)));
                     },
                 );
             }));
             if outcome.is_err() {
-                let _ = tx.send(Event::Record("后台任务发生异常，已结束当前任务".into()));
+                let _ = tx.send(Event::Status("后台任务发生异常，已结束当前任务".into()));
             }
             let _ = tx.send(Event::Done);
             let _ = wake.try_send(());
         });
     if let Err(e) = spawn {
-        let _ = fallback.send(Event::Record(format!("无法创建任务线程: {e}")));
+        let _ = fallback.send(Event::Status(format!("无法创建任务线程: {e}")));
         let _ = fallback.send(Event::Done);
     }
 }
@@ -191,13 +193,12 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ui = AppWindow::new()?;
     let exe = std::env::current_exe()?;
     let base = exe.parent().unwrap();
-    let config = Config::load(&base.join("conf"));
+    let config = Config::load(&base.join("conf.toml"));
     let c = match config {
         Ok(c) => Arc::new(c),
         Err(e) => {
             tracing::error!("{e}");
             ui.set_enabled(false);
-            ui.set_records(e.clone().into());
             ui.set_status(format!("{e}；修正 conf 后请重新打开管理器").into());
             return ui.run().map_err(Into::into);
         }
@@ -207,7 +208,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Err(e) => {
             tracing::error!("{e}");
             ui.set_enabled(false);
-            ui.set_records(e.clone().into());
             ui.set_status(e.into());
             return ui.run().map_err(Into::into);
         }
@@ -219,10 +219,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         selected: HashSet::new(),
         busy: Arc::new(AtomicBool::new(false)),
         closing: false,
-        records: vec![],
         rows: Rc::new(VecModel::default()),
         first_snapshot: true,
         scan_error: false,
+        detail_index: None,
     }));
     ui.set_services(ModelRc::from(v.borrow().rows.clone()));
     if let Err(e) = logging {
@@ -247,7 +247,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }));
                 let event = match result {
                     Ok(s) => Event::Snapshot(s),
-                    Err(_) => Event::Record("状态监控异常，稍后重试".into()),
+                    Err(_) => Event::Status("状态监控异常，稍后重试".into()),
                 };
                 if monitor_tx.send(event).is_err() {
                     break;
@@ -259,6 +259,31 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         })?;
+    {
+        let v = v.clone();
+        let weak = ui.as_weak();
+        ui.on_open_detail(move |index| {
+            if let Some(ui) = weak.upgrade() {
+                let mut v = v.borrow_mut();
+                let index = index as usize;
+                if v.detail_index.is_none() && index < v.config.apps.len() {
+                    v.detail_index = Some(index);
+                    v.render(&ui);
+                    ui.set_detail_open(true);
+                }
+            }
+        });
+    }
+    {
+        let v = v.clone();
+        let weak = ui.as_weak();
+        ui.on_close_detail(move || {
+            if let Some(ui) = weak.upgrade() {
+                v.borrow_mut().detail_index = None;
+                ui.set_detail_open(false);
+            }
+        });
+    }
     {
         let v = v.clone();
         let weak = ui.as_weak();
@@ -307,8 +332,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let c = v.borrow().config.clone();
                         let tx = tx.clone();
                         std::thread::spawn(move || {
-                            let result = manager::open_log(&c, index).unwrap_or_else(|e| e);
-                            let _ = tx.send(Event::Record(result));
+                            let result = manager::open_app_folder(&c, index).unwrap_or_else(|e| e);
+                            let _ = tx.send(Event::Status(result));
                         });
                     } else {
                         submit(
@@ -367,7 +392,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     ui.on_dispatch_events(move || {
         if let Some(ui) = weak.upgrade() {
             let mut v = v.borrow_mut();
-            for event in rx.try_iter() {
+            if let Ok(event) = rx.try_recv() {
                 match event {
                     Event::Snapshot(s) => {
                         let error = s
@@ -400,7 +425,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         v.render(&ui);
                     }
-                    Event::Record(text) => v.record(&ui, text),
+                    Event::Status(text) => v.set_status(&ui, text),
                     Event::Done => {
                         v.busy.store(false, Ordering::Release);
                         v.render(&ui);

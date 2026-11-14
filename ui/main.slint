@@ -3,10 +3,14 @@ import { VerticalBox, HorizontalBox, Button, CheckBox, ScrollView } from "std-wi
 export struct Service {
     name: string,
     pid: string,
+    current-memory: string,
+    ports-summary: string,
+    ports-full: string,
+    ports-count: int,
+    command-lines: int,
     started: string,
-    memory: string,
-    ports: string,
     jar-time: string,
+    command-line: string,
     running: bool,
     uncertain: bool,
     problem: bool,
@@ -16,35 +20,181 @@ export struct Service {
     can-restart: bool,
 }
 
-component ActionCell inherits VerticalBox {
-    in property <string> label;
+component CenteredCheckBox inherits VerticalBox {
+    in property <bool> checked;
     in property <bool> enabled: true;
-    callback clicked();
-    width: 48px;
-    height: 44px;
+    callback toggled(bool);
+    width: 26px;
+    height: 100%;
     padding: 0px;
     alignment: center;
-    Button {
-        text: root.label;
-        width: 48px;
-        height: 32px;
+    CheckBox {
+        width: 26px;
+        checked: root.checked;
         enabled: root.enabled;
-        clicked => { root.clicked(); }
+        toggled => { root.toggled(self.checked); }
     }
 }
 
+component GridTextCell inherits Rectangle {
+    in property <length> cell-width;
+    in property <string> value;
+    in property <brush> foreground: #dbe3ee;
+    in property <int> font-size: 12;
+    width: root.cell-width;
+    height: 100%;
+    Text {
+        x: 12px;
+        y: 0px;
+        width: max(0px, parent.width - 24px);
+        height: 100%;
+        text: root.value;
+        color: root.foreground;
+        font-size: root.font-size * 1px;
+        vertical-alignment: center;
+        horizontal-alignment: left;
+        overflow: elide;
+    }
+}
+
+// Both the table heading and each data row use this exact cell geometry.
+component TableRow inherits Rectangle {
+    in property <bool> header;
+    in property <bool> busy;
+    in property <bool> enabled: true;
+    in property <bool> all-selected;
+    in property <int> row-index: -1;
+    in property <string> name;
+    in property <string> pid;
+    in property <string> jvm;
+    in property <string> ports;
+    in property <string> started;
+    in property <string> updated;
+    in property <bool> running;
+    in property <bool> uncertain;
+    in property <bool> problem;
+    in property <bool> selected;
+    in property <bool> can-start;
+    in property <bool> can-stop;
+    in property <bool> can-restart;
+    in property <bool> can-update;
+    callback select(bool);
+    callback select-all(bool);
+    callback open-detail(int);
+    callback action(int, string);
+
+    width: 100%;
+    height: root.header ? 40px : 44px;
+    background: root.header ? #161b23 : root.selected ? #26364b : #1b222c;
+
+    if !root.header: TouchArea {
+        width: parent.width;
+        height: parent.height;
+        double-clicked => { root.open-detail(root.row-index); }
+    }
+
+    HorizontalBox {
+        padding: 0px;
+        spacing: 0px;
+        width: parent.width;
+        height: parent.height;
+
+        Rectangle {
+            width: 40px;
+            height: parent.height;
+            CenteredCheckBox {
+                checked: root.header ? root.all-selected : root.selected;
+                enabled: root.enabled && !root.busy;
+                toggled(checked) => {
+                    if root.header { root.select-all(checked); } else { root.select(checked); }
+                }
+            }
+        }
+        GridTextCell { cell-width: 130px; value: root.header ? "应用名称" : root.name; foreground: root.header ? #8290a4 : root.uncertain || root.problem ? #f0757d : root.running ? #48ce99 : #eaf0f8; }
+        GridTextCell { cell-width: 85px; value: root.header ? "PID" : root.pid; foreground: root.header ? #8290a4 : #dbe3ee; }
+        GridTextCell { cell-width: 205px; value: root.header ? "内存" : root.jvm; foreground: root.header ? #8290a4 : #9fbff7; }
+        GridTextCell { cell-width: 250px; value: root.header ? "监听端口" : root.ports; foreground: root.header ? #8290a4 : #dbe3ee; }
+        GridTextCell { cell-width: 165px; value: root.header ? "启动时间" : root.started; foreground: root.header ? #8290a4 : #dbe3ee; font-size: 11; }
+        GridTextCell { cell-width: 165px; value: root.header ? "更新时间" : root.updated; foreground: root.header ? #8290a4 : #dbe3ee; font-size: 11; }
+        Rectangle {
+            width: 360px;
+            height: parent.height;
+            if root.header: GridTextCell { cell-width: 360px; value: "操作"; foreground: #8290a4; }
+            if !root.header: Button { x: 12px; y: (parent.height - 30px) / 2; width: 48px; height: 30px; text: "启动"; enabled: root.enabled && !root.busy && root.can-start; clicked => { root.action(root.row-index, "start"); } }
+            if !root.header: Button { x: 68px; y: (parent.height - 30px) / 2; width: 48px; height: 30px; text: "停止"; enabled: root.enabled && !root.busy && root.can-stop; clicked => { root.action(root.row-index, "stop"); } }
+            if !root.header: Button { x: 124px; y: (parent.height - 30px) / 2; width: 48px; height: 30px; text: "重启"; enabled: root.enabled && !root.busy && root.can-restart; clicked => { root.action(root.row-index, "restart"); } }
+            if !root.header: Button { x: 180px; y: (parent.height - 30px) / 2; width: 48px; height: 30px; text: "更新"; enabled: root.enabled && !root.busy && root.can-update; clicked => { root.action(root.row-index, "update"); } }
+            if !root.header: Button { x: 236px; y: (parent.height - 30px) / 2; width: 48px; height: 30px; text: "日志"; enabled: root.enabled; clicked => { root.action(root.row-index, "log"); } }
+        }
+        // The scroll view's 14px scrollbar overlays only this empty trailing cell.
+        Rectangle { horizontal-stretch: 1; height: parent.height; background: transparent; }
+    }
+    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #11151c; }
+}
+
+component SelectableText inherits TextInput {
+    in property <string> value;
+    in property <brush> foreground: #eaf0f8;
+    in property <int> size: 12;
+    in property <bool> multiline: false;
+    text: root.value;
+    color: root.foreground;
+    font-size: root.size * 1px;
+    horizontal-alignment: left;
+    vertical-alignment: root.multiline ? top : center;
+    read-only: true;
+    single-line: !root.multiline;
+    wrap: root.multiline ? word-wrap : no-wrap;
+}
+
+component DetailRow inherits Rectangle {
+    in property <string> label;
+    in property <string> value;
+    in property <int> content-lines: 1;
+    in property <bool> multiline: false;
+    in property <length> row-height: max(44px, root.content-lines * 18px + 20px);
+    height: root.row-height;
+    HorizontalBox {
+        padding: 0px;
+        spacing: 0px;
+        width: parent.width;
+        height: parent.height;
+        Rectangle {
+            width: 160px;
+            height: parent.height;
+            background: #202a36;
+            SelectableText { x: 12px; width: parent.width - 24px; height: parent.height; value: root.label; foreground: #8fa4b9; }
+        }
+        Rectangle {
+            horizontal-stretch: 1;
+            height: parent.height;
+            background: #1b222c;
+            SelectableText {
+                x: 12px;
+                y: root.multiline ? 8px : 0px;
+                width: parent.width - 24px;
+                height: root.multiline ? parent.height - 16px : parent.height;
+                value: root.value;
+                multiline: root.multiline;
+            }
+        }
+    }
+    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #35414e; }
+}
+
 export component AppWindow inherits Window {
-    title: "CIS Cluster Manager";
-    preferred-width: 1400px;
+    title: "jkeeper";
+    preferred-width: 1500px;
     preferred-height: 850px;
-    min-width: 1080px;
-    min-height: 550px;
+    min-width: 1480px;
+    min-height: 650px;
     background: #161b23;
 
     in property <[Service]> services;
+    in property <Service> detail-service;
     in property <string> directory;
     in property <string> status;
-    in property <string> records;
+    in property <bool> detail-open;
     in property <bool> busy;
     in property <bool> enabled: true;
     in property <bool> bulk-start;
@@ -56,22 +206,28 @@ export component AppWindow inherits Window {
     callback dispatch-events();
     callback select(int, bool);
     callback select-all(bool);
+    callback open-detail(int);
+    callback close-detail();
     callback action(int, string);
     callback bulk(string);
     callback refresh();
 
+    detail-keyboard := FocusScope {
+        width: 0px;
+        height: 0px;
+        enabled: root.detail-open;
+        key-pressed(event) => {
+            if (root.detail-open && event.text == Key.Escape) {
+                root.close-detail();
+                accept
+            } else { reject }
+        }
+    }
+
     VerticalBox {
         padding: 20px;
         spacing: 8px;
-
-        Text {
-            height: 18px;
-            text: root.directory;
-            color: #8290a4;
-            overflow: elide;
-            vertical-alignment: center;
-        }
-
+        Text { height: 18px; text: root.directory; color: #8290a4; overflow: elide; vertical-alignment: center; }
         HorizontalBox {
             padding: 0px;
             height: 34px;
@@ -83,77 +239,100 @@ export component AppWindow inherits Window {
             Button { text: "刷新"; width: 48px; height: 32px; enabled: root.enabled; clicked => { root.refresh(); } }
         }
 
-        HorizontalBox {
-            padding-left: 5px;
-            padding-right: 5px;
-            spacing: 8px;
-            height: 40px;
-            CheckBox {
-                width: 26px;
-                checked: root.all-selected;
-                enabled: root.enabled && !root.busy;
-                toggled => { root.select-all(self.checked); }
-            }
-            Text { width: 100px; text: "应用名称"; color: #8290a4; vertical-alignment: center; }
-            Text { width: 58px; text: "PID"; color: #8290a4; vertical-alignment: center; }
-            Text { width: 145px; text: "启动时间"; color: #8290a4; vertical-alignment: center; }
-            Text { width: 175px; text: "JVM 最小 / 实际 / 最大"; color: #8290a4; vertical-alignment: center; }
-            Text { width: 145px; text: "JAR 更新时间"; color: #8290a4; vertical-alignment: center; }
-            Text { text: "监听端口"; color: #8290a4; min-width: 65px; horizontal-stretch: 1; vertical-alignment: center; }
-            Text { width: 272px; text: "操作"; color: #8290a4; vertical-alignment: center; }
-        }
-
-        ScrollView {
+        VerticalBox {
             vertical-stretch: 1;
-            VerticalBox {
-                spacing: 1px;
+            spacing: 0px;
+            TableRow {
+                header: true;
+                enabled: root.enabled;
+                busy: root.busy;
+                all-selected: root.all-selected;
+                select-all(checked) => { root.select-all(checked); }
+            }
+            HorizontalBox {
                 padding: 0px;
-                for s[i] in root.services: Rectangle {
-                    height: 44px;
-                    background: s.selected ? #26364b : #1b222c;
-                    HorizontalBox {
+                spacing: 0px;
+                vertical-stretch: 1;
+                ScrollView {
+                    vertical-stretch: 1;
+                    vertical-scrollbar-policy: as-needed;
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalBox {
+                        spacing: 1px;
                         padding: 0px;
-                        spacing: 8px;
-                        CheckBox {
-                            width: 26px;
-                            checked: s.selected;
-                            enabled: !root.busy;
-                            toggled => { root.select(i, self.checked); }
+                        for service[index] in root.services: TableRow {
+                            header: false;
+                            enabled: root.enabled;
+                            busy: root.busy;
+                            row-index: index;
+                            name: service.name;
+                            pid: service.pid;
+                            jvm: service.current-memory;
+                            ports: service.ports-summary;
+                            started: service.started;
+                            updated: service.jar-time;
+                            running: service.running;
+                            uncertain: service.uncertain;
+                            problem: service.problem;
+                            selected: service.selected;
+                            can-start: service.can-start;
+                            can-stop: service.running && !service.uncertain;
+                            can-restart: service.can-restart;
+                            can-update: service.can-update;
+                            select(selected) => { root.select(index, selected); }
+                            open-detail(index) => {
+                                root.open-detail(index);
+                                detail-keyboard.focus();
+                            }
+                            action(index, action) => { root.action(index, action); }
                         }
-                        Text { width: 100px; text: s.name; color: s.uncertain || s.problem ? #f0757d : s.running ? #48ce99 : #eaf0f8; overflow: elide; vertical-alignment: center; }
-                        Text { width: 58px; text: s.pid; color: #dbe3ee; vertical-alignment: center; }
-                        Text { width: 145px; text: s.started; color: #dbe3ee; font-size: 11px; vertical-alignment: center; }
-                        Text { width: 175px; text: s.memory; color: #9fbff7; font-size: 12px; vertical-alignment: center; }
-                        Text { width: 145px; text: s.jar-time; color: #dbe3ee; font-size: 11px; vertical-alignment: center; }
-                        Text { text: s.ports; color: #dbe3ee; overflow: elide; min-width: 65px; horizontal-stretch: 1; vertical-alignment: center; }
-                        ActionCell { label: "启动"; enabled: root.enabled && !root.busy && s.can-start; clicked => { root.action(i, "start"); } }
-                        ActionCell { label: "停止"; enabled: root.enabled && !root.busy && s.running && !s.uncertain; clicked => { root.action(i, "stop"); } }
-                        ActionCell { label: "重启"; enabled: root.enabled && !root.busy && s.can-restart; clicked => { root.action(i, "restart"); } }
-                        ActionCell { label: "更新"; enabled: root.enabled && !root.busy && s.can-update; clicked => { root.action(i, "update"); } }
-                        ActionCell { label: "日志"; enabled: root.enabled; clicked => { root.action(i, "log"); } }
+                    }
+                }
+                Rectangle { width: 14px; vertical-stretch: 1; background: #161b23; }
+            }
+        }
+        Text { height: 22px; text: root.status; color: #dbe3ee; overflow: elide; vertical-alignment: center; }
+    }
+
+    if root.detail-open: Rectangle {
+        x: 0px; y: 0px; width: 100%; height: 100%; background: #99000000;
+        TouchArea { width: 100%; height: 100%; clicked => { root.close-detail(); } }
+        Rectangle {
+            x: (parent.width - 840px) / 2;
+            y: (parent.height - 760px) / 2;
+            width: 840px; height: 650px;
+            border-radius: 6px; border-width: 1px; border-color: #394655;
+            background: #1b222c;
+            TouchArea { width: 100%; height: 100%; }
+            VerticalBox {
+                padding: 0px; spacing: 0px;
+                Rectangle {
+                    height: 50px;
+                    background: #202a36;
+                    HorizontalBox {
+                        padding-left: 20px; padding-right: 16px;
+                        SelectableText { value: root.detail-service.name + "   应用详情"; foreground: #dbe6f2; size: 15; horizontal-stretch: 1; }
+                        TouchArea { width: 32px; height: 32px; clicked => { root.close-detail(); }
+                            Text { width: parent.width; height: parent.height; text: "×"; color: #9fb0c3; font-size: 20px; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+                    }
+                }
+                Rectangle { height: 1px; background: #394655; }
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalBox {
+                        padding: 20px; spacing: 0px;
+                        DetailRow { label: "应用名称"; value: root.detail-service.name; }
+                        DetailRow { label: "运行状态"; value: root.detail-service.running ? "运行中" : "已停止"; }
+                        DetailRow { label: "PID"; value: root.detail-service.pid; }
+                        DetailRow { label: "内存"; value: root.detail-service.current-memory; }
+                        DetailRow { label: "监听端口"; value: root.detail-service.ports-full; content-lines: max(1, root.detail-service.ports-count); multiline: true; }
+                        DetailRow { label: "启动命令"; value: root.detail-service.command-line == "" ? "—" : root.detail-service.command-line; content-lines: root.detail-service.command-lines; multiline: true; }
+                        DetailRow { label: "启动时间"; value: root.detail-service.started; }
+                        DetailRow { label: "更新时间"; value: root.detail-service.jar-time; }
                     }
                 }
             }
-        }
-
-        Text { height: 18px; text: "操作记录"; color: #eaf0f8; vertical-alignment: center; }
-        Rectangle {
-            height: 110px;
-            background: #11151c;
-            ScrollView {
-                VerticalBox {
-                    alignment: start;
-                    padding: 8px;
-                    Text { text: root.records; color: #aabbd0; font-size: 12px; wrap: word-wrap; horizontal-alignment: left; vertical-alignment: top; }
-                }
-            }
-        }
-        Text {
-            height: 22px;
-            text: root.status;
-            color: #dbe3ee;
-            overflow: elide;
-            vertical-alignment: center;
         }
     }
 }

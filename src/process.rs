@@ -263,7 +263,7 @@ pub fn cluster_lock(dir: &Path) -> Result<Handle, String> {
     let hash = path_key(dir).bytes().fold(0xcbf29ce484222325u64, |h, b| {
         (h ^ b as u64).wrapping_mul(0x100000001b3)
     });
-    let name = wide(format!("Global\\CisClusterManager-{hash:016x}"));
+    let name = wide(format!("Global\\jkeeper-{hash:016x}"));
     unsafe {
         let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if h.is_null() {

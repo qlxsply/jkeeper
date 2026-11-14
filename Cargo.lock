@@ -536,22 +536,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cis-cluster-manager"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "serde",
- "serde_json",
- "slint",
- "slint-build",
- "toml 0.9.12+spec-1.1.0",
- "tracing",
- "tracing-subscriber",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
 name = "clang-sys"
 version = "1.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2080,6 +2064,22 @@ name = "itoa"
 version = "1.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3bd1574e617a9a6c1f8f8181bd7e841e1f20e4277607ef28945765188d6284d4"
+
+[[package]]
+name = "jkeeper"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "slint",
+ "slint-build",
+ "toml 0.9.12+spec-1.1.0",
+ "tracing",
+ "tracing-subscriber",
+ "windows-sys 0.61.2",
+ "zip",
+]
 
 [[package]]
 name = "jni"

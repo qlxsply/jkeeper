@@ -1,0 +1,124 @@
+# jkeeper 配置
+# conf 与程序 exe 放在同一目录。所有应用由 [[apps]] 明确列出。
+# Windows 路径使用单引号；java_path 与 source_files 必须是绝对路径。
+
+[general]
+manage_dir = 'C:\Users\corwin\Desktop\cis-cluster'
+
+# 必须直接指向 java.exe。
+java_path = 'D:\DevApp\java\jdk8u392-full\bin\java.exe'
+
+# JVM 参数为单行；系统属性与 Spring 参数为参数行数组。
+java_vm_args = '-Xms64m -Xmx128m'
+java_system_args = ['-Dfile.encoding=utf-8']
+java_agent_args = ''
+java_spring_args = [
+    '--spring.config.location=file:./application.yml,file:./bootstrap.yaml',
+]
+
+pid_file = '{app}.pid'
+stop_timeout_seconds = 15
+force_kill_timeout_seconds = 5
+start_check_seconds = 2
+log_dir = 'logs'
+
+[[apps]]
+name = 'gateway'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-platform-usercenter\witlink-platform-gateway\target\gateway.jar',
+]
+
+[[apps]]
+name = 'usercenter'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-platform-usercenter\witlink-platform-usercenter\witlink-platform-usercenter-app\target\usercenter.jar',
+]
+
+[[apps]]
+name = 'system'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-system\witlink-app-system\target\system.jar',
+]
+
+[[apps]]
+name = 'workorder'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-workorder\witlink-app-workorder\target\workorder.jar',
+]
+
+[[apps]]
+name = 'crm'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-crm\witlink-app-crm\target\crm.jar',
+]
+
+[[apps]]
+name = 'tariff'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-tariff\witlink-app-tariff\target\tariff.jar',
+]
+
+[[apps]]
+name = 'pay'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-pay\witlink-app-pay\target\pay.jar',
+]
+java_vm_args = '-Xms64m -Xmx512m'
+
+[[apps]]
+name = 'postpay'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-postpay\witlink-app-postpay\target\postpay.jar',
+]
+
+[[apps]]
+name = 'prepay'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-prepay\witlink-app-prepay\target\prepay.jar',
+]
+
+[[apps]]
+name = 'sts'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-sts\witlink-app-sts\target\sts.jar',
+]
+
+[[apps]]
+name = 'masset'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-masset\witlink-app-masset\target\masset.jar',
+]
+
+[[apps]]
+name = 'message'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-message\witlink-app-message\target\message.jar',
+]
+
+[[apps]]
+name = 'agent'
+type = 'java'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-agent\witlink-app-agent\target\agent.jar',
+]
+
+# App 级参数组整组覆盖 general 中对应参数组，例如：
+# java_path = 'D:\DevApp\java\jdk21\bin\java.exe'
+# jar_name = 'custom.jar'
+# java_vm_args = '-Xms128m -Xmx512m -XX:+UseG1GC'
+# java_system_args = ['-Dfile.encoding=utf-8 -Duser.timezone=Asia/Shanghai']
+# java_agent_args = '-javaagent:D:\tools\agent.jar'
+# java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml', '--spring.profiles.active=prod']
+# log_dir = ''  # 禁止写入此应用的控制台 stdout/stderr 文件

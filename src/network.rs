@@ -5,7 +5,7 @@ use windows_sys::Win32::{
     Networking::WinSock::{AF_INET, AF_INET6},
 };
 
-pub fn ports() -> Result<HashMap<u32, BTreeSet<String>>, String> {
+pub fn ports() -> Result<HashMap<u32, Vec<String>>, String> {
     let mut result = HashMap::<u32, BTreeSet<String>>::new();
     for ipv6 in [false, true] {
         for tcp in [true, false] {
@@ -62,5 +62,8 @@ pub fn ports() -> Result<HashMap<u32, BTreeSet<String>>, String> {
             }
         }
     }
-    Ok(result)
+    Ok(result
+        .into_iter()
+        .map(|(pid, ports)| (pid, crate::port_format::normalize(ports)))
+        .collect())
 }

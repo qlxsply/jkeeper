@@ -94,27 +94,34 @@ fn fixture() -> Fixture {
             .to_string()
     };
     fs::write(
-        dir.join("conf"),
+        dir.join("conf.toml"),
         format!(
             r#"
 [general]
 manage_dir = '.'
 java_path = '{java}'
-min_memory = '32m'
-max_memory = '96m'
+java_vm_args = '-Xms32m -Xmx96m'
+java_system_args = ['-Dfile.encoding=utf-8']
+java_agent_args = ''
+java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml']
 start_check_seconds = 0.2
 force_kill_timeout_seconds = 5
 [[apps]]
 name = 'fixture'
-source_jar = 'source.jar'
-"#
+type = 'java'
+jar_name = 'source.jar'
+source_files = ['{source}']
+"#,
+            java = java,
+            source = dir.join("source.jar").display(),
         ),
     )
     .unwrap();
     fs::write(dir.join("fixture/application.yml"), "# test\n").unwrap();
     fs::write(dir.join("fixture/bootstrap.yaml"), "# test\n").unwrap();
     fs::copy(dir.join("fixture/fixture.jar"), dir.join("source.jar")).unwrap();
-    let config = Config::load(&dir.join("conf")).unwrap();
+    fs::copy(dir.join("source.jar"), dir.join("fixture/source.jar")).unwrap();
+    let config = Config::load(&dir.join("conf.toml")).unwrap();
     Fixture { dir, config }
 }
 
@@ -123,7 +130,22 @@ source_jar = 'source.jar'
 fn java_lifecycle_and_native_monitoring() {
     let f = fixture();
     let c = &f.config;
-    assert!(manager::scan(c)[0].can_start);
+    let stopped = manager::scan(c).remove(0);
+    assert!(stopped.can_start);
+    assert_eq!(stopped.command_source, "配置启动命令");
+    for arg in [
+        "-Xms32m",
+        "-Xmx96m",
+        "-Dfile.encoding=utf-8",
+        "-jar",
+        "--spring.config.location=file:./application.yml,file:./bootstrap.yaml",
+    ] {
+        assert!(
+            stopped.command_line.contains(arg),
+            "configured command missing {arg}: {}",
+            stopped.command_line
+        );
+    }
     assert!(manager::execute(c, 0, "start").unwrap().contains("已启动"));
     let until = Instant::now() + Duration::from_secs(15);
     while !f.dir.join("fixture/ready.txt").exists() && Instant::now() < until {
@@ -132,20 +154,32 @@ fn java_lifecycle_and_native_monitoring() {
     let expected = fs::read_to_string(f.dir.join("fixture/ready.txt")).unwrap();
     let s = manager::scan(c).remove(0);
     let id = s.identity.unwrap();
+    assert_eq!(s.command_source, "当前进程实际命令");
+    let argv = process::arguments(&s.command_line);
+    assert!(argv.iter().any(|arg| arg == "-Xms32m"));
+    assert!(argv.iter().any(|arg| arg == "-Xmx96m"));
+    assert!(
+        argv.windows(2)
+            .any(|args| args[0] == "-jar" && PathBuf::from(&args[1]).is_absolute())
+    );
     assert!(!s.uncertain, "{}", s.note);
     assert!(!s.can_update);
     for port in expected.lines() {
         assert!(
-            s.ports.split(", ").any(|p| p == port),
+            s.ports.iter().any(|p| p == port),
             "missing {port} in {}",
-            s.ports
+            s.ports.join(", ")
         );
     }
     let h = process::verify(id.pid, id.created, &c.jar(&c.apps[0]), false).unwrap();
     assert!(process::memory(&h).unwrap() > 0);
     assert!(process::verify(id.pid, id.created + 1, &c.jar(&c.apps[0]), true).is_err());
     assert!(process::verify(id.pid, id.created, &f.dir.join("other.jar"), true).is_err());
-    assert!(manager::execute(c, 0, "update").is_err());
+    assert!(
+        manager::execute(c, 0, "update")
+            .unwrap()
+            .contains("更新操作不可用")
+    );
     assert!(manager::execute(c, 0, "start").unwrap().contains("跳过"));
     fs::remove_file(f.dir.join("fixture/application.yml")).unwrap();
     assert!(manager::execute(c, 0, "restart").is_err());
@@ -161,8 +195,7 @@ fn java_lifecycle_and_native_monitoring() {
     assert!(manager::execute(c, 0, "stop").unwrap().contains("强制停止"));
     assert!(!c.pid(&c.apps[0]).exists());
     manager::execute(c, 0, "update").unwrap();
-    assert!(c.jar(&c.apps[0]).with_extension("jar.bak").is_file());
-    assert!(c.log(&c.apps[0]).is_file());
+    assert!(c.log_dir(&c.apps[0]).unwrap().is_dir());
     assert!(
         fs::read_to_string(f.dir.join("fixture/logs/console.out.log"))
             .unwrap()
@@ -173,7 +206,7 @@ fn java_lifecycle_and_native_monitoring() {
             .unwrap()
             .contains("ready")
     );
-    fs::remove_file(f.dir.join("fixture/fixture.jar")).unwrap();
+    fs::remove_file(f.dir.join("fixture/source.jar")).unwrap();
     assert!(manager::execute(c, 0, "start").is_err());
     manager::execute(c, 0, "update").unwrap();
     assert!(manager::scan(c)[0].can_start);
@@ -197,12 +230,15 @@ fn fifty_live_services_monitoring_stress() {
         fs::write(dir.join("bootstrap.yaml"), "# test\n").unwrap();
         config.apps.push(crate::config::App {
             name,
+            app_type: "java".into(),
+            source_files: vec![fixture.dir.join("source.jar")],
             jar_name: None,
-            source_jar: Some(fixture.dir.join("source.jar")),
             java_path: None,
-            min_memory: Some("32m".into()),
-            max_memory: Some("64m".into()),
-            log_file: None,
+            java_vm_args: Some("-Xms32m -Xmx64m".into()),
+            java_system_args: None,
+            java_agent_args: None,
+            java_spring_args: None,
+            log_dir: None,
         });
     }
     config.apps.remove(0);
@@ -226,12 +262,12 @@ fn fifty_live_services_monitoring_stress() {
         .unwrap()
         .parent()
         .unwrap();
-    let manager_exe = target.join("release/cis-cluster-manager.exe");
+    let manager_exe = target.join("release/jkeeper.exe");
     assert!(
         manager_exe.is_file(),
         "Build release executable before the 50-service stress test"
     );
-    let test_manager = fixture.dir.join("cis-cluster-manager.exe");
+    let test_manager = fixture.dir.join("jkeeper.exe");
     fs::copy(&manager_exe, &test_manager).unwrap();
     let mut ui = Command::new(&test_manager)
         .current_dir(&fixture.dir)
@@ -291,9 +327,9 @@ fn fifty_live_services_monitoring_stress() {
 }
 
 #[test]
-#[ignore = "Subprocess helper; no action without CIS_TEST_CONF"]
+#[ignore = "Subprocess helper; no action without JKEEPER_TEST_CONF"]
 fn launch_and_exit_helper() {
-    if let Some(path) = std::env::var_os("CIS_TEST_CONF") {
+    if let Some(path) = std::env::var_os("JKEEPER_TEST_CONF") {
         let c = Config::load(&PathBuf::from(path)).unwrap();
         manager::execute(&c, 0, "start").unwrap();
     }
@@ -310,7 +346,7 @@ fn survives_manager_exit_and_is_recovered() {
             "--exact",
             "--nocapture",
         ])
-        .env("CIS_TEST_CONF", f.dir.join("conf"))
+        .env("JKEEPER_TEST_CONF", f.dir.join("conf.toml"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -328,7 +364,7 @@ fn survives_manager_exit_and_is_recovered() {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let fresh = Config::load(&f.dir.join("conf")).unwrap();
+    let fresh = Config::load(&f.dir.join("conf.toml")).unwrap();
     let s = manager::scan(&fresh).remove(0);
     assert!(s.identity.is_some(), "{}", s.note);
     assert!(!s.uncertain);

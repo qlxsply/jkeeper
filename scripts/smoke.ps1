@@ -1,7 +1,7 @@
-param([int[]]$ServiceCounts = @(13, 50), [int]$Seconds = 15)
+param([int[]]$ServiceCounts = @(13, 50), [int]$Seconds = 15, [int]$ResizeWidth = 0)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
-$exe = Join-Path $root 'target\release\cis-cluster-manager.exe'
+$exe = Join-Path $root 'target\release\jkeeper.exe'
 if (!(Test-Path -LiteralPath $exe)) { throw 'Build the release executable first.' }
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
@@ -15,6 +15,7 @@ public class SmokeWindow {
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
 }
 '@
 $java = (Get-Command java.exe).Source
@@ -23,13 +24,14 @@ foreach ($count in $ServiceCounts) {
     $dir = Join-Path $root "target\smoke-$count"
     $services = Join-Path $dir 'services'
     [System.IO.Directory]::CreateDirectory($services) | Out-Null
-    Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'cis-cluster-manager.exe')
+    Copy-Item -LiteralPath $exe -Destination (Join-Path $dir 'jkeeper.exe')
     Copy-Item -LiteralPath (Join-Path $root 'tests\fixtures\TestService.java') -Destination $dir
     & javac --release 8 -d $dir (Join-Path $dir 'TestService.java')
     if ($LASTEXITCODE -ne 0) { throw 'javac failed' }
     & jar cfe (Join-Path $dir 'source.jar') TestService -C $dir TestService.class
     if ($LASTEXITCODE -ne 0) { throw 'jar failed' }
-    $text = "[general]`nmanage_dir = '$services'`njava_path = '$java'`nmin_memory = '32m'`nmax_memory = '96m'`nstart_check_seconds = 2`n"
+    $sourceJar = Join-Path $dir 'source.jar'
+    $text = "[general]`nmanage_dir = '$services'`njava_path = '$java'`njava_vm_args = '-Xms32m -Xmx96m'`njava_system_args = ['-Dfile.encoding=utf-8']`njava_agent_args = ''`njava_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml']`nstart_check_seconds = 2`n"
     for ($i = 1; $i -le $count; $i++) {
         $name = 'test{0:d2}' -f $i
         $appdir = Join-Path $services $name
@@ -37,13 +39,14 @@ foreach ($count in $ServiceCounts) {
         Copy-Item -LiteralPath (Join-Path $dir 'source.jar') -Destination (Join-Path $appdir "$name.jar")
         [System.IO.File]::WriteAllText((Join-Path $appdir 'application.yml'), '# isolated smoke test')
         [System.IO.File]::WriteAllText((Join-Path $appdir 'bootstrap.yaml'), '# isolated smoke test')
-        $text += "`n[[apps]]`nname = '$name'`nsource_jar = 'source.jar'`n"
+        $text += "`n[[apps]]`nname = '$name'`ntype = 'java'`nsource_files = ['$sourceJar']`n"
     }
-    [System.IO.File]::WriteAllText((Join-Path $dir 'conf'), $text, (New-Object System.Text.UTF8Encoding($false)))
+    [System.IO.File]::WriteAllText((Join-Path $dir 'conf.toml'), $text, (New-Object System.Text.UTF8Encoding($false)))
     $watch = [System.Diagnostics.Stopwatch]::StartNew()
-    $p = Start-Process -FilePath (Join-Path $dir 'cis-cluster-manager.exe') -WindowStyle Normal -PassThru
+    $p = Start-Process -FilePath (Join-Path $dir 'jkeeper.exe') -WindowStyle Normal -PassThru
     try {
         if (!$p.WaitForInputIdle(15000)) { throw 'Window input-idle timeout' }
+        if ($ResizeWidth -gt 0) { [SmokeWindow]::SetWindowPos($p.MainWindowHandle, [IntPtr]::Zero, 0, 0, $ResizeWidth, 850, 0x0006) | Out-Null }
         $watch.Stop()
         Start-Sleep -Seconds 3
         $p.Refresh()

@@ -1,0 +1,29 @@
+# 复制为 exe 同目录下的 conf.toml；程序只在启动时读取一次。
+[general]
+manage_dir = 'D:\cis-cluster'
+java_path = 'D:\Java\jdk8\bin\java.exe'
+java_vm_args = '-Xms64m -Xmx128m'
+java_system_args = ['-Dfile.encoding=utf-8']
+java_agent_args = ''
+java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml']
+pid_file = '{app}.pid'
+stop_timeout_seconds = 15
+force_kill_timeout_seconds = 5
+start_check_seconds = 2
+log_dir = 'logs'
+
+[[apps]]
+name = 'gateway'
+type = 'java'
+source_files = [
+    'D:\build\gateway.jar',
+    'D:\build\application.yml',
+    'D:\build\bootstrap.yaml',
+]
+# jar_name 默认 gateway.jar；若改名，应保证 manage_dir/gateway 下有该目标 JAR。
+# java_path = 'D:\Java\jdk21\bin\java.exe'
+# java_vm_args = '-Xms128m -Xmx512m -XX:+UseG1GC'
+# java_system_args = ['-Dfile.encoding=utf-8 -Duser.timezone=Asia/Shanghai']
+# java_agent_args = '-javaagent:D:\tools\agent.jar'
+# java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml', '--spring.profiles.active=prod']
+# log_dir = '' # 禁用此应用的 stdout/stderr 日志文件

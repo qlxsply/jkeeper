@@ -7,6 +7,7 @@ mod jar_time;
 mod logging;
 mod manager;
 mod network;
+mod port_format;
 mod process;
 mod scheduler;
 slint::include_modules!();

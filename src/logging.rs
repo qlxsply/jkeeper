@@ -60,7 +60,7 @@ pub fn init() -> Result<PathBuf, String> {
     let dir = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
-        .join("CisClusterManager")
+        .join("jkeeper")
         .join("logs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("manager-{}.log", std::process::id()));
