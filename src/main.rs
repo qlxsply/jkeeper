@@ -10,6 +10,7 @@ mod network;
 mod port_format;
 mod process;
 mod scheduler;
+mod window_state;
 slint::include_modules!();
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     app::run()

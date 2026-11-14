@@ -242,7 +242,6 @@ fn fifty_live_services_monitoring_stress() {
         });
     }
     config.apps.remove(0);
-    config.apps.sort_by_key(|a| a.name.clone());
     let config = Config {
         apps: config.apps,
         ..config

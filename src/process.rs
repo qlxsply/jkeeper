@@ -11,6 +11,19 @@ pub fn wide(s: impl AsRef<std::ffi::OsStr>) -> Vec<u16> {
 pub fn error() -> String {
     std::io::Error::last_os_error().to_string()
 }
+pub fn show_startup_error(message: &str) {
+    let text = wide(message);
+    let caption = wide("jkeeper");
+    unsafe {
+        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+            std::ptr::null_mut(),
+            text.as_ptr(),
+            caption.as_ptr(),
+            windows_sys::Win32::UI::WindowsAndMessaging::MB_OK
+                | windows_sys::Win32::UI::WindowsAndMessaging::MB_ICONERROR,
+        );
+    }
+}
 pub struct Handle(pub HANDLE);
 unsafe impl Send for Handle {}
 unsafe impl Sync for Handle {}

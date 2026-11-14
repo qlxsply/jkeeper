@@ -269,7 +269,6 @@ impl Config {
                 validate_relative_log_dir(path, &format!("{}.log_dir", app.name))?;
             }
         }
-        config.apps.sort_by_key(|app| app.name.to_lowercase());
         Ok(config)
     }
 
@@ -374,40 +373,41 @@ type = 'future-type'
         let path = dir.join("conf.toml");
         std::fs::write(&path, &text).unwrap();
         let c = Config::load(&path).unwrap();
-        assert_eq!(c.apps[0].name, "alpha");
-        assert!(c.apps[0].source_files.is_empty());
-        assert_eq!(c.apps[1].source_files[0], dir.join("alpha.jar"));
-        assert_eq!(c.java(&c.apps[1]), dir.join("jdk space/bin/java.exe"));
+        assert_eq!(c.apps[0].name, "zeta");
+        assert_eq!(c.apps[1].name, "alpha");
+        assert!(c.apps[1].source_files.is_empty());
+        assert_eq!(c.apps[0].source_files[0], dir.join("alpha.jar"));
+        assert_eq!(c.java(&c.apps[0]), dir.join("jdk space/bin/java.exe"));
         assert_eq!(
-            c.system_args(&c.apps[0]),
+            c.system_args(&c.apps[1]),
             ["-Dfile.encoding=utf-8 -Duser.timezone=UTC"]
         );
         assert!(
-            c.log_dir(&c.apps[0])
+            c.log_dir(&c.apps[1])
                 .unwrap()
                 .ends_with(Path::new("alpha").join("logs"))
         );
-        assert_eq!(c.vm_args(&c.apps[1]), "-Xms32m -Xmx256m");
-        assert_eq!(c.vm_args(&c.apps[0]), "-Xms64m -Xmx128m");
+        assert_eq!(c.vm_args(&c.apps[0]), "-Xms32m -Xmx256m");
+        assert_eq!(c.vm_args(&c.apps[1]), "-Xms64m -Xmx128m");
         assert_eq!(
-            c.system_args(&c.apps[1]),
+            c.system_args(&c.apps[0]),
             ["-Dfile.encoding=utf-8 -Dspring.profiles.active=test"]
         );
         let argv =
-            crate::process::arguments(&crate::manager::configured_command(&c, &c.apps[1]).unwrap());
-        assert_eq!(argv[0], c.java(&c.apps[1]).to_string_lossy());
+            crate::process::arguments(&crate::manager::configured_command(&c, &c.apps[0]).unwrap());
+        assert_eq!(argv[0], c.java(&c.apps[0]).to_string_lossy());
         assert_eq!(argv[1], "-Xms32m");
         assert_eq!(argv[2], "-Xmx256m");
         assert_eq!(argv[3], "-Dfile.encoding=utf-8");
         assert_eq!(argv[4], "-Dspring.profiles.active=test");
         assert_eq!(argv[5], "-jar");
-        assert_eq!(PathBuf::from(&argv[6]), c.jar(&c.apps[1]));
+        assert_eq!(PathBuf::from(&argv[6]), c.jar(&c.apps[0]));
         assert_eq!(
             argv[7],
             "--spring.config.location=file:./application.yml,file:./bootstrap.yaml"
         );
 
-        let mut custom = c.apps[1].clone();
+        let mut custom = c.apps[0].clone();
         custom.java_vm_args = Some("-Djava.exe={java_path}".into());
         let argv =
             crate::process::arguments(&crate::manager::configured_command(&c, &custom).unwrap());

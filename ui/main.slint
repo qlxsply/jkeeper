@@ -152,7 +152,7 @@ component DetailRow inherits Rectangle {
     in property <string> value;
     in property <int> content-lines: 1;
     in property <bool> multiline: false;
-    in property <length> row-height: max(44px, root.content-lines * 18px + 20px);
+    in property <length> row-height: max(44px, root.content-lines * 18px + 16px);
     height: root.row-height;
     HorizontalBox {
         padding: 0px;

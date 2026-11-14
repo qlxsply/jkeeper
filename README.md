@@ -150,6 +150,8 @@ release\
 
 双击 `jkeeper.exe` 启动。程序从 exe 所在目录读取 `conf.toml`，不依赖当前工作目录。要启动 Java 服务，还需确保 `conf.toml` 配置的 JDK `java.exe`、`source_files` 和 `manage_dir` 中的应用文件在目标机实际存在。
 
+同一 `manage_dir` 同时只允许一个可操作的 jkeeper 实例。重复启动会在创建主窗口前提示并退出。窗口关闭后 Java 服务继续运行。窗口位置和大小会原子保存到 `manage_dir\jkeeper-window.json`；首次运行或状态文件无效时窗口居中打开，保存位置若超出当前虚拟桌面则会限制到屏幕范围内。窗口首次显示后会进行一次轻微重布局，避免恢复尺寸时出现首帧渲染区域不完整。
+
 ## 常见检查
 
 - **提示找不到 linker / `link.exe`**：确认已安装 Visual Studio 的 Desktop development with C++、MSVC x64 工具和 Windows SDK；从 Developer PowerShell 运行构建。

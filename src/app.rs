@@ -4,10 +4,11 @@ use crate::{
     manager::{self, Status},
     process,
 };
-use slint::{ComponentHandle, Model, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, Timer, TimerMode, VecModel};
 use std::{
     cell::RefCell,
     collections::HashSet,
+    path::Path,
     rc::Rc,
     sync::{
         Arc,
@@ -16,6 +17,21 @@ use std::{
     },
     time::Duration,
 };
+
+fn persist_window_geometry(
+    window: &slint::Window,
+    path: &Path,
+    last_saved: &RefCell<Option<crate::window_state::WindowState>>,
+) {
+    let state = crate::window_state::WindowState::current(window);
+    if last_saved.borrow().as_ref() == Some(&state) {
+        return;
+    }
+    match crate::window_state::WindowState::write_atomic(path, state) {
+        Ok(()) => *last_saved.borrow_mut() = Some(state),
+        Err(error) => tracing::warn!("保存窗口状态失败: {error}"),
+    }
+}
 
 enum Event {
     Snapshot(Vec<Status>),
@@ -186,32 +202,61 @@ fn submit(
 }
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let logging = crate::logging::init();
-    slint::BackendSelector::new()
-        .backend_name("winit".into())
-        .renderer_name("software".into())
-        .select()?;
-    let ui = AppWindow::new()?;
     let exe = std::env::current_exe()?;
     let base = exe.parent().unwrap();
-    let config = Config::load(&base.join("conf.toml"));
-    let c = match config {
+    let c = match Config::load(&base.join("conf.toml")) {
         Ok(c) => Arc::new(c),
         Err(e) => {
             tracing::error!("{e}");
-            ui.set_enabled(false);
-            ui.set_status(format!("{e}；修正 conf 后请重新打开管理器").into());
-            return ui.run().map_err(Into::into);
+            process::show_startup_error(&format!("{e}\n请修正 conf.toml 后重新启动 jkeeper。"));
+            return Ok(());
         }
     };
     let _lock = match process::cluster_lock(&c.general.manage_dir) {
         Ok(h) => h,
         Err(e) => {
             tracing::error!("{e}");
-            ui.set_enabled(false);
-            ui.set_status(e.into());
-            return ui.run().map_err(Into::into);
+            process::show_startup_error(&format!("{e}\njkeeper 将退出。"));
+            return Ok(());
         }
     };
+    slint::BackendSelector::new()
+        .backend_name("winit".into())
+        .renderer_name("software".into())
+        .select()?;
+    let ui = AppWindow::new()?;
+    let window = ui.window();
+    let scale = window.scale_factor();
+    let min_width = (1480.0 * scale).ceil() as u32;
+    let min_height = (650.0 * scale).ceil() as u32;
+    let state_path = crate::window_state::WindowState::path(&c.general.manage_dir);
+    let restored = match crate::window_state::WindowState::read(&state_path, min_width, min_height)
+    {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!("{error}，使用屏幕居中默认位置");
+            None
+        }
+    };
+    if let Some(state) = restored {
+        // Apply the persisted geometry before the native window is first shown,
+        // so the window never flashes at a temporary centered position.
+        state.apply(window);
+    } else {
+        crate::window_state::WindowState::center(window);
+    }
+    let last_window_state = Rc::new(RefCell::new(restored));
+    let state_timer = Timer::default();
+    {
+        let weak = ui.as_weak();
+        let state_path = state_path.clone();
+        let last = last_window_state.clone();
+        state_timer.start(TimerMode::Repeated, Duration::from_millis(500), move || {
+            if let Some(ui) = weak.upgrade() {
+                persist_window_geometry(ui.window(), &state_path, &last);
+            }
+        });
+    }
     ui.set_directory(c.general.manage_dir.display().to_string().into());
     let v = Rc::new(RefCell::new(View {
         config: c.clone(),
@@ -375,8 +420,13 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     {
         let v = v.clone();
         let weak = ui.as_weak();
+        let state_path = state_path.clone();
+        let last_window_state = last_window_state.clone();
         ui.window().on_close_requested(move || {
             let mut v = v.borrow_mut();
+            if let Some(ui) = weak.upgrade() {
+                persist_window_geometry(ui.window(), &state_path, &last_window_state);
+            }
             if v.busy.load(Ordering::Acquire) {
                 v.closing = true;
                 if let Some(ui) = weak.upgrade() {
@@ -395,6 +445,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             if let Ok(event) = rx.try_recv() {
                 match event {
                     Event::Snapshot(s) => {
+                        let first_snapshot = v.first_snapshot;
                         let error = s
                             .iter()
                             .enumerate()
@@ -424,12 +475,18 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         v.render(&ui);
+                        if first_snapshot {
+                            // Request a full redraw after the initial service model is populated.
+                            // Avoid resizing/repositioning the native window after it is shown.
+                            ui.window().request_redraw();
+                        }
                     }
                     Event::Status(text) => v.set_status(&ui, text),
                     Event::Done => {
                         v.busy.store(false, Ordering::Release);
                         v.render(&ui);
                         if v.closing {
+                            persist_window_geometry(ui.window(), &state_path, &last_window_state);
                             let _ = slint::quit_event_loop();
                         }
                     }

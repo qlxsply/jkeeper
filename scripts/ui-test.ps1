@@ -6,10 +6,13 @@ if (!(Test-Path -LiteralPath (Join-Path $dir 'services\test02\test02.jar'))) { t
 Copy-Item -LiteralPath (Join-Path $root 'target\release\jkeeper.exe') -Destination (Join-Path $dir 'jkeeper.exe')
 Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public class UiTestWindow {
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+    public delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr wp, IntPtr lp);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr hwnd);
@@ -18,6 +21,33 @@ public class UiTestWindow {
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hwnd, StringBuilder text, int maxCount);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
+    public static string[] WindowClasses(int pid) {
+        var classes = new List<string>();
+        EnumWindows((hwnd, _) => {
+            uint owner; GetWindowThreadProcessId(hwnd, out owner);
+            if (owner == (uint)pid && IsWindowVisible(hwnd)) {
+                var name = new StringBuilder(256); GetClassName(hwnd, name, name.Capacity); classes.Add(name.ToString());
+            }
+            return true;
+        }, IntPtr.Zero);
+        return classes.ToArray();
+    }
+    public static void CloseOwnedDialogs(int pid) {
+        EnumWindows((hwnd, _) => {
+            uint owner; GetWindowThreadProcessId(hwnd, out owner);
+            if (owner == (uint)pid) {
+                var name = new StringBuilder(256); GetClassName(hwnd, name, name.Capacity);
+                if (name.ToString() == "#32770") PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero);
+            }
+            return true;
+        }, IntPtr.Zero);
+    }
     public static void Click(IntPtr hwnd, int x, int y) {
         double scale = GetDpiForWindow(hwnd) / 96.0;
         int pos = ((int)(y * scale) << 16) | (int)(x * scale);
@@ -42,6 +72,7 @@ if (!$original.Contains("manage_dir = '$dir\services'")) { throw 'Fixture config
 $p = $null
 $pid1 = Join-Path $dir 'services\test01\test01.pid'
 $pid2 = Join-Path $dir 'services\test02\test02.pid'
+$windowState = Join-Path $dir 'services\jkeeper-window.json'
 function Open-TestManager {
     $process = Start-Process -FilePath (Join-Path $dir 'jkeeper.exe') -WindowStyle Normal -PassThru
     $process.WaitForInputIdle(15000) | Out-Null
@@ -51,7 +82,20 @@ function Open-TestManager {
     return $process
 }
 try {
+    Remove-Item -LiteralPath $windowState -Force -ErrorAction SilentlyContinue
     $p = Open-TestManager
+    [UiTestWindow]::SetWindowPos($p.MainWindowHandle, [IntPtr]::Zero, 72, 64, 1500, 850, 0x0014) | Out-Null
+    Start-Sleep -Milliseconds 800
+    if (!(Test-Path -LiteralPath $windowState)) { throw 'Window geometry state was not persisted under manage_dir.' }
+    $savedWindow = [System.IO.File]::ReadAllText($windowState) | ConvertFrom-Json
+    if ($savedWindow.x -lt 60 -or $savedWindow.y -lt 50) { throw "Moved window coordinates were not saved: $savedWindow" }
+    $second = Start-Process -FilePath (Join-Path $dir 'jkeeper.exe') -WindowStyle Normal -PassThru
+    $second.WaitForInputIdle(10000) | Out-Null
+    Start-Sleep -Milliseconds 250
+    $classes = [UiTestWindow]::WindowClasses($second.Id)
+    if ($classes.Count -eq 0 -or $classes | Where-Object { $_ -ne '#32770' }) { throw "Duplicate jkeeper created a non-error window before rejecting the instance: $($classes -join ', ')" }
+    [UiTestWindow]::CloseOwnedDialogs($second.Id)
+    if (!$second.WaitForExit(5000)) { $second.Kill(); throw 'Duplicate-instance error dialog did not close.' }
     [UiTestWindow]::Click($p.MainWindowHandle, 44, 158)
     [UiTestWindow]::Click($p.MainWindowHandle, 44, 203)
     Start-Sleep -Milliseconds 200
@@ -65,6 +109,7 @@ try {
     Start-Sleep -Milliseconds 300
     if ($p.HasExited) { throw 'Window closed before its task completed.' }
     if (!$p.WaitForExit(20000)) { throw 'Window did not close after the batch completed.' }
+    if (!(Test-Path -LiteralPath $windowState)) { throw 'Window state file was lost when the manager closed during a task.' }
     $one = [System.IO.File]::ReadAllText($pid1) | ConvertFrom-Json
     $two = [System.IO.File]::ReadAllText($pid2) | ConvertFrom-Json
     if ($one.created -ge $two.created) { throw 'Batch order is incorrect.' }
@@ -74,6 +119,11 @@ try {
     }
     [System.IO.File]::WriteAllText($conf, $original, (New-Object System.Text.UTF8Encoding($false)))
     $p = Open-TestManager
+    $restoredRect = New-Object UiTestWindow+Rect
+    [UiTestWindow]::GetWindowRect($p.MainWindowHandle, [ref]$restoredRect) | Out-Null
+    $clientRect = New-Object UiTestWindow+Rect
+    [UiTestWindow]::GetClientRect($p.MainWindowHandle, [ref]$clientRect) | Out-Null
+    if ([Math]::Abs($restoredRect.Left - $savedWindow.x) -gt 3 -or [Math]::Abs($restoredRect.Top - $savedWindow.y) -gt 3 -or [Math]::Abs(($clientRect.Right - $clientRect.Left) - $savedWindow.width) -gt 8 -or [Math]::Abs(($clientRect.Bottom - $clientRect.Top) - $savedWindow.height) -gt 3) { throw "Window position/size was not restored. Saved=$($savedWindow | ConvertTo-Json -Compress); WindowRect=$($restoredRect | ConvertTo-Json -Compress); ClientRect=$($clientRect | ConvertTo-Json -Compress)" }
     [UiTestWindow]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
     [UiTestWindow]::DoubleClick($p.MainWindowHandle, 100, 158)
     Start-Sleep -Milliseconds 500
@@ -106,6 +156,7 @@ try {
 } finally {
     if ($p -and !$p.HasExited) { $p.CloseMainWindow() | Out-Null; if (!$p.WaitForExit(20000)) { $p.Kill() } }
     [System.IO.File]::WriteAllText($conf, $original, (New-Object System.Text.UTF8Encoding($false)))
+    Remove-Item -LiteralPath $windowState -Force -ErrorAction SilentlyContinue
     # Clean up only fixture processes whose PID, exact creation time and executable are verified.
     foreach ($number in 1..13) {
         $name = 'test{0:d2}' -f $number
