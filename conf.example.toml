@@ -1,29 +1,117 @@
-# 复制为 exe 同目录下的 conf.toml；程序只在启动时读取一次。
+# jkeeper 完整配置示例
+#
+# 使用方法：复制为 jkeeper.exe 同目录下的 conf.toml，再按目标电脑修改路径。
+# 程序启动时读取一次配置；修改 conf.toml 后需要重启 jkeeper。
+# Windows 路径使用单引号，避免 TOML 将反斜杠解释为转义字符。
+#
+# 每个 [[apps]] 对应 manage_dir/<name> 应用目录。
+# 应用列表和批量操作均严格按 [[apps]] 在本文件中的定义顺序执行。
+
 [general]
-manage_dir = 'D:\cis-cluster'
+# 必填。管理目录必须已存在。每个应用自己的目录是此目录下以应用 name 命名的子目录。
+manage_dir = 'D:\jkeeper\services'
+
+# 必填。JDK bin 目录中的 java.exe 完整绝对路径，不是 bin 目录路径。
 java_path = 'D:\Java\jdk8\bin\java.exe'
-java_vm_args = '-Xms64m -Xmx128m'
-java_system_args = ['-Dfile.encoding=utf-8']
+
+# 全局 JVM 参数，作为单个字符串按 Windows 命令行引号规则解析；不经过 cmd/shell。
+# 常用于 -Xms、-Xmx、垃圾回收器、JIT、线程栈等 JVM 选项。
+# 不设置 Xms/Xmx 时 JVM 使用自身默认堆大小。
+java_vm_args = '-Xms64m -Xmx512m -XX:+UseG1GC -XX:MaxGCPauseMillis=200'
+
+# 全局 Java 系统属性列表，按数组顺序拼接。
+# 每个数组元素可以是一个或多个 Windows 命令行参数；通常每项写一个或几个 -D 属性。
+java_system_args = [
+    '-Dfile.encoding=utf-8',
+    '-Duser.timezone=Asia/Shanghai -Djava.awt.headless=true',
+]
+
+# 全局调试、诊断及 Java Agent 参数，单个字符串；无参数时设为空字符串。
+# 可使用 -agentlib:、-agentpath:、-javaagent:、-Xdebug、-Xrunjdwp: 等 JVM 选项。
 java_agent_args = ''
-java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml']
+
+# 全局 Spring Boot 应用参数列表，按数组顺序拼接到 -jar <绝对路径> 之后。
+# 每个数组元素可以包含一个或多个应用参数。
+java_spring_args = [
+    '--spring.config.location=file:./application.yml,file:./bootstrap.yaml',
+    '--spring.main.banner-mode=off',
+]
+
+# PID 元数据文件名模板。必须包含 {app}，例如 pay.pid；文件位于应用目录中。
 pid_file = '{app}.pid'
+
+# 普通停止等待秒数。当前 Windows 停止操作直接强制终止，因此此字段保留供配置定义使用，
+# 当前停止实现不把 TerminateProcess 描述成 Java 优雅关闭。
 stop_timeout_seconds = 15
+
+# 强制终止后等待进程退出的最长秒数。
 force_kill_timeout_seconds = 5
+
+# 启动后等待多久检查 JVM 是否立即退出。仅代表进程存活检查，不代表 Spring 已完成初始化。
 start_check_seconds = 2
+
+# Java stdout/stderr 相对于 manage_dir/<name> 的输出目录。
+# 例如 pay 的输出文件位于 <manage_dir>/pay/logs/console.out.log 和 console.err.log。
+# 空字符串表示全局禁用控制台输出文件；应用级 log_dir 可以单独覆盖。
 log_dir = 'logs'
 
+
+# 示例一：完整应用配置。
+# java_path、参数组、jar_name、log_dir 均显式配置，用来展示全部应用级字段。
+[[apps]]
+# 必填。该名称同时决定应用目录 <manage_dir>/pay。
+name = 'pay'
+
+# 必填。当前可操作类型为 java；未知类型会显示在列表中，但禁用管理操作。
+type = 'java'
+
+# Java 必填，必须是绝对路径列表，且列表中必须直接包含至少一个 JAR 文件项。
+# 普通文件复制到应用目录根部；目录会以目录名复制到应用目录并保留其内部结构。
+# 每个来源 basename 必须唯一，避免多个来源写入同一个目标。
+source_files = [
+    'D:\Build\pay\pay.jar',
+    'D:\Build\pay\deploy-resources',
+]
+
+# 可选。启动时使用的目标 JAR 文件名，必须是应用目录根部的 .jar 文件。
+# 它只决定启动时查找哪个目标 JAR，不会重命名或映射 source_files 中的文件。
+# 若来源文件名与 jar_name 不同，更新后仍保留来源文件名；应用目录根部必须另有 jar_name 指定的 JAR，否则启动失败。
+jar_name = 'pay.jar'
+
+# 可选。应用专用 java.exe 绝对路径；此项整项覆盖 general.java_path。
+java_path = 'D:\Java\jdk21\bin\java.exe'
+
+# 可选。应用专用 JVM 参数字符串；设置后整组覆盖 general.java_vm_args，不与全局合并。
+java_vm_args = '-Xms128m -Xmx768m -XX:+UseG1GC -XX:MaxGCPauseMillis=150 -XX:CompileThreshold=10000'
+
+# 可选。应用专用系统属性列表；设置后整组覆盖 general.java_system_args。
+# 想保留全局属性时，需在此列表中再次写入。
+java_system_args = [
+    '-Dfile.encoding=utf-8 -Duser.timezone=Asia/Shanghai',
+    '-Dspring.profiles.active=production',
+]
+
+# 可选。应用专用 Agent/调试参数；设置后覆盖 general.java_agent_args。
+# 本例展示 javaagent；部署时请将路径改为目标电脑上真实存在的 agent JAR。
+java_agent_args = '-javaagent:D:\Tools\agents\monitor-agent.jar'
+
+# 可选。应用专用 Spring 参数列表；设置后整组覆盖 general.java_spring_args。
+java_spring_args = [
+    '--spring.config.location=file:./application.yml,file:./bootstrap.yaml',
+    '--spring.main.banner-mode=off --spring.application.name=pay',
+]
+
+# 可选。相对于 <manage_dir>/pay 的控制台日志目录；设置后覆盖 general.log_dir。
+# 空字符串 '' 禁用此应用的 stdout/stderr 文件。
+log_dir = 'logs/pay-console'
+
+
+# 示例二：部分使用全局默认配置。
+# 只提供必填项；jar_name 默认 gateway.jar，Java 路径、4 个参数组和 log_dir 均继承 [general]。
 [[apps]]
 name = 'gateway'
 type = 'java'
 source_files = [
-    'D:\build\gateway.jar',
-    'D:\build\application.yml',
-    'D:\build\bootstrap.yaml',
+    'D:\Build\gateway\gateway.jar',
+    'D:\Build\gateway\extra-config',
 ]
-# jar_name 默认 gateway.jar；若改名，应保证 manage_dir/gateway 下有该目标 JAR。
-# java_path = 'D:\Java\jdk21\bin\java.exe'
-# java_vm_args = '-Xms128m -Xmx512m -XX:+UseG1GC'
-# java_system_args = ['-Dfile.encoding=utf-8 -Duser.timezone=Asia/Shanghai']
-# java_agent_args = '-javaagent:D:\tools\agent.jar'
-# java_spring_args = ['--spring.config.location=file:./application.yml,file:./bootstrap.yaml', '--spring.profiles.active=prod']
-# log_dir = '' # 禁用此应用的 stdout/stderr 日志文件

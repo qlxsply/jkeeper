@@ -431,4 +431,39 @@ type = 'future-type'
         );
         assert_eq!(config.general.java_vm_args, "-Xms64m -Xmx128m");
     }
+
+    #[test]
+    fn example_conf_documents_full_and_inherited_app_options() {
+        let config: Config = toml::from_str(include_str!("../conf.example.toml")).unwrap();
+        assert_eq!(config.apps.len(), 2);
+        assert!(config.general.java_system_args.len() >= 2);
+        assert!(config.general.java_spring_args.len() >= 2);
+        assert!(config.apps.iter().all(|app| app.source_files.len() >= 2));
+
+        let full = &config.apps[0];
+        assert!(full.jar_name.is_some());
+        assert!(full.java_path.is_some());
+        assert!(full.java_vm_args.is_some());
+        assert!(
+            full.java_system_args
+                .as_ref()
+                .is_some_and(|args| args.len() >= 2)
+        );
+        assert!(full.java_agent_args.is_some());
+        assert!(
+            full.java_spring_args
+                .as_ref()
+                .is_some_and(|args| args.len() >= 2)
+        );
+        assert!(full.log_dir.is_some());
+
+        let inherited = &config.apps[1];
+        assert!(inherited.jar_name.is_none());
+        assert!(inherited.java_path.is_none());
+        assert!(inherited.java_vm_args.is_none());
+        assert!(inherited.java_system_args.is_none());
+        assert!(inherited.java_agent_args.is_none());
+        assert!(inherited.java_spring_args.is_none());
+        assert!(inherited.log_dir.is_none());
+    }
 }
