@@ -138,7 +138,31 @@ release\
 
 如正在运行的 `release\jkeeper.exe` 被 Windows 锁定，打包脚本会将新版本输出到 `release\jkeeper.next.exe`。关闭旧版后，用该文件替换 `jkeeper.exe`。
 
-## 四、在目标电脑运行
+## 四、清空编译和打包
+
+在项目根目录的 Developer PowerShell 中执行。请先关闭正在运行的 jkeeper，避免 Windows 锁定 exe。下面的命令会删除 Cargo 编译缓存和 `release` 中的旧发布文件，但**保留 `release\conf.toml`**（如果存在），然后重新编译并打包：
+
+```powershell
+cargo clean
+if ($LASTEXITCODE -ne 0) { throw 'cargo clean failed.' }
+
+$release = Join-Path (Get-Location).Path 'release'
+if (Test-Path -LiteralPath $release) {
+    Get-ChildItem -LiteralPath $release |
+        Where-Object { $_.Name -ne 'conf.toml' } |
+        Remove-Item -Recurse -Force
+}
+
+cargo build --release --locked
+if ($LASTEXITCODE -ne 0) { throw 'Release build failed.' }
+
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
+```
+
+如果要连同已编辑的发布配置也重新生成，请在上述命令前手动备份 `release\conf.toml`，并在清理块中移除保留它的 `Where-Object` 筛选。打包后将按脚本规则从项目根目录复制 `conf.toml`。
+
+## 五、在目标电脑运行
 
 把 `release` 目录中的 `jkeeper.exe` 和配置文件一起复制到目标电脑的任意目录；至少需要：
 
