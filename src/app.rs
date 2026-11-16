@@ -104,6 +104,10 @@ fn service_model(app: &AppConfig, status: &Status, selected: bool) -> Service {
 }
 impl View {
     fn render(&mut self, ui: &AppWindow) {
+        self.render_with_model_reset(ui, false);
+    }
+
+    fn render_with_model_reset(&mut self, ui: &AppWindow, reset_model: bool) {
         let rows: Vec<Service> = self
             .config
             .apps
@@ -111,7 +115,7 @@ impl View {
             .enumerate()
             .map(|(i, a)| service_model(a, &self.statuses[i], self.selected.contains(&i)))
             .collect();
-        if self.rows.row_count() != rows.len() {
+        if reset_model || self.rows.row_count() != rows.len() {
             self.rows.set_vec(rows);
         } else {
             for (index, row) in rows.into_iter().enumerate() {
@@ -151,6 +155,13 @@ impl View {
 pub fn claim(flag: &AtomicBool) -> bool {
     flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_ok()
+}
+
+fn set_all_selection(selected: &mut HashSet<usize>, row_count: usize, checked: bool) {
+    selected.clear();
+    if checked {
+        selected.extend(0..row_count);
+    }
 }
 fn submit(
     view: &Rc<RefCell<View>>,
@@ -353,14 +364,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         ui.on_select_all(move |selected| {
             if let Some(ui) = weak.upgrade() {
                 let mut v = v.borrow_mut();
-                for i in 0..v.config.apps.len() {
-                    if selected {
-                        v.selected.insert(i);
-                    } else {
-                        v.selected.remove(&i);
-                    }
-                }
-                v.render(&ui);
+                let row_count = v.config.apps.len();
+                set_all_selection(&mut v.selected, row_count, selected);
+                // Recreate every checkbox after a select-all transition, including rows
+                // whose selection value was already true from manual selection.
+                v.render_with_model_reset(&ui, true);
             }
         });
     }
@@ -520,5 +528,14 @@ mod tests {
         );
         flag.store(false, Ordering::Release);
         assert!(claim(&flag));
+    }
+
+    #[test]
+    fn select_all_includes_previously_manual_selections_and_clear_removes_everything() {
+        let mut selected = HashSet::from([0, 2, 4]);
+        set_all_selection(&mut selected, 6, true);
+        assert_eq!(selected, HashSet::from([0, 1, 2, 3, 4, 5]));
+        set_all_selection(&mut selected, 6, false);
+        assert!(selected.is_empty());
     }
 }

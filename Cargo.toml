@@ -17,6 +17,9 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_
 
 [build-dependencies]
 slint-build = "1.15"
+image = { version = "0.25", default-features = false, features = ["png"] }
+png = "0.18"
+winres = "0.1.12"
 
 [profile.release]
 lto = "thin"

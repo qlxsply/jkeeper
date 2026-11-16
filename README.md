@@ -99,6 +99,7 @@ cargo build --release --locked
 - 首次编译需要联网下载 `Cargo.lock` 中锁定的 crate。
 - `--locked` 要求按仓库 `Cargo.lock` 构建，不会悄悄更新依赖锁定版本。
 - 本项目启用了 Windows GUI 子系统和静态 CRT。
+- 应用图标使用 `assets/jkeeper.png`；构建时自动生成多尺寸透明 Windows ICO，并嵌入 exe，同时设置原生窗口图标。
 
 检查生成结果：
 
