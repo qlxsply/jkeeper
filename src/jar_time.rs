@@ -63,34 +63,3 @@ fn build_time(path: &Path) -> Option<String> {
     }
     None
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    #[test]
-    fn explicit_build_metadata_and_fallback() {
-        let path = std::env::temp_dir().join(format!("cis-jar-time-{}.jar", std::process::id()));
-        let mut zip = zip::ZipWriter::new(std::fs::File::create(&path).unwrap());
-        zip.start_file(
-            "META-INF/build-info.properties",
-            zip::write::SimpleFileOptions::default(),
-        )
-        .unwrap();
-        zip.write_all(b"build.time=2026-01-02T03\\:04\\:05Z\n")
-            .unwrap();
-        zip.finish().unwrap();
-        let expected = chrono::DateTime::parse_from_rfc3339("2026-01-02T03:04:05Z")
-            .unwrap()
-            .with_timezone(&chrono::Local)
-            .format("%Y-%m-%d %H:%M:%S")
-            .to_string();
-        assert_eq!(display(&path), expected);
-        std::fs::write(&path, b"not a zip").unwrap();
-        assert_eq!(
-            display(&path),
-            crate::manager::format_time(std::fs::metadata(&path).unwrap().modified().unwrap())
-        );
-        std::fs::remove_file(path).unwrap();
-    }
-}

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="light">
+  <title>jkeeper · Java 应用管理</title>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="panel">
+      <div class="panel-heading">
+        <p class="directory" id="directory">正在读取管理目录…</p>
+        <div class="bulk-actions">
+          <button class="button button-outline" id="refresh"><span class="refresh-icon">↻</span> 刷新状态</button>
+          <button class="button button-success" data-bulk="start" disabled>启动选中</button>
+          <button class="button button-danger" data-bulk="stop" disabled>停止选中</button>
+          <button class="button button-primary" data-bulk="restart" disabled>重启选中</button>
+          <button class="button button-outline" data-bulk="update" disabled>更新选中</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th class="check-col"><input id="select-all" type="checkbox" aria-label="全选"></th>
+            <th>应用名称</th><th>状态</th><th>PID</th><th>内存</th><th>监听端口</th><th>启动时间</th><th>更新时间</th><th class="actions-head">操作</th>
+          </tr></thead>
+          <tbody id="service-rows"><tr><td class="loading" colspan="9">正在连接本地管理服务…</td></tr></tbody>
+        </table>
+      </div>
+      <footer class="panel-footer"><span id="selection-count">未选择应用</span><span class="live-status"><i></i><span id="status">正在初始化</span></span></footer>
+    </section>
+  </main>
+
+  <dialog id="detail-dialog" class="detail-dialog">
+    <div class="dialog-heading"><span class="eyebrow">应用信息</span><button class="icon-button" id="close-detail" aria-label="关闭">×</button></div>
+    <div class="detail-content" id="detail-content"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js"></script>
+</body>
+</html>

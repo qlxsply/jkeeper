@@ -98,8 +98,8 @@ cargo build --release --locked
 
 - 首次编译需要联网下载 `Cargo.lock` 中锁定的 crate。
 - `--locked` 要求按仓库 `Cargo.lock` 构建，不会悄悄更新依赖锁定版本。
-- 本项目启用了 Windows GUI 子系统和静态 CRT。
-- 应用图标使用 `assets/jkeeper.png`；构建时自动生成多尺寸透明 Windows ICO，并嵌入 exe，同时设置原生窗口图标。
+- 本项目启用了 Windows GUI 子系统和静态 CRT。界面使用 Tauri 2 + 系统 WebView2；网页资源直接嵌入 `jkeeper.exe`，不需要随 exe 分发前端目录或 DLL。运行目标机需要有 Microsoft Edge WebView2 Runtime。
+- 应用图标使用 `assets/jkeeper.png`；构建时自动生成多尺寸透明 Windows ICO 并嵌入 exe。窗口启动时居中，每次关闭窗口即结束 jkeeper。
 
 检查生成结果：
 
@@ -129,7 +129,7 @@ Test-Path .\release\conf.example.toml
 
 ```text
 release\
-  jkeeper.exe
+  jkeeper.exe       # 单文件应用程序（内嵌 Tauri 前端）
   conf.toml
   conf.example.toml
   README.md
@@ -165,7 +165,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
 
 ## 五、在目标电脑运行
 
-把 `release` 目录中的 `jkeeper.exe` 和配置文件一起复制到目标电脑的任意目录；至少需要：
+`jkeeper.exe` 本身是单文件应用程序，HTML/CSS/JavaScript 前端已内嵌，不需要额外的前端文件、WebView2Loader.dll 或安装包。运行时仍需将 `conf.toml` 放在 exe 同目录；目标机还需要 WebView2 Runtime，以及配置所需的 JDK 和应用文件。至少复制：
 
 ```text
 目标目录\
@@ -175,7 +175,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
 
 双击 `jkeeper.exe` 启动。程序从 exe 所在目录读取 `conf.toml`，不依赖当前工作目录。要启动 Java 服务，还需确保 `conf.toml` 配置的 JDK `java.exe`、`source_files` 和 `manage_dir` 中的应用文件在目标机实际存在。
 
-同一 `manage_dir` 同时只允许一个可操作的 jkeeper 实例。重复启动会在创建主窗口前提示并退出。窗口关闭后 Java 服务继续运行。窗口位置和大小会原子保存到 `manage_dir\jkeeper-window.json`；首次运行或状态文件无效时窗口居中打开，保存位置若超出当前虚拟桌面则会限制到屏幕范围内。窗口首次显示后会进行一次轻微重布局，避免恢复尺寸时出现首帧渲染区域不完整。
+全局同一时间只允许一个 `jkeeper.exe` 实例运行，不受配置目录影响。重复启动会提示并退出。窗口每次在屏幕中央打开；关闭窗口会直接结束管理器进程，但已启动的 Java 服务继续运行。程序不创建或读取 `jkeeper-window.json`。
 
 ## 常见检查
 

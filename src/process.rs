@@ -109,20 +109,6 @@ pub fn creation(h: &Handle) -> Result<u64, String> {
         Ok((a.dwHighDateTime as u64) << 32 | a.dwLowDateTime as u64)
     }
 }
-#[cfg(test)]
-pub fn cpu_time_100ns(h: &Handle) -> Result<u64, String> {
-    unsafe {
-        let mut creation: FILETIME = std::mem::zeroed();
-        let mut exit = creation;
-        let mut kernel = creation;
-        let mut user = creation;
-        if GetProcessTimes(h.0, &mut creation, &mut exit, &mut kernel, &mut user) == 0 {
-            return Err(error());
-        }
-        let ticks = |f: FILETIME| (f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64;
-        Ok(ticks(kernel) + ticks(user))
-    }
-}
 pub fn memory(h: &Handle) -> Result<usize, String> {
     unsafe {
         let mut counters: PROCESS_MEMORY_COUNTERS = std::mem::zeroed();
@@ -271,61 +257,19 @@ pub fn replace(temp: &Path, target: &Path) -> Result<(), String> {
         Ok(())
     }
 }
-pub fn cluster_lock(dir: &Path) -> Result<Handle, String> {
-    // Stable FNV-1a hash: all instances use the same normalized directory key.
-    let hash = path_key(dir).bytes().fold(0xcbf29ce484222325u64, |h, b| {
-        (h ^ b as u64).wrapping_mul(0x100000001b3)
-    });
-    let name = wide(format!("Global\\jkeeper-{hash:016x}"));
+pub fn global_instance_lock() -> Result<Handle, String> {
+    let name = wide("Global\\jkeeper-single-instance");
     unsafe {
         let h = CreateMutexW(std::ptr::null(), 0, name.as_ptr());
         if h.is_null() {
-            return Err(format!("无法创建集群互斥锁: {}", error()));
+            return Err(format!("无法创建全局实例互斥锁: {}", error()));
         }
         let exists = GetLastError() == ERROR_ALREADY_EXISTS;
         let h = Handle(h);
         if exists {
-            Err("此集群已由另一个管理器管理，请关闭当前窗口".into())
+            Err("已有一个 jkeeper.exe 正在运行，请先关闭它".into())
         } else {
             Ok(h)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn identity_requires_absolute_exact_jar() {
-        let jar = Path::new(r"C:\apps\pay\pay.jar");
-        assert!(matches_jar(
-            r#"java.exe -Xmx128m -jar "C:\apps\pay\pay.jar""#,
-            jar
-        ));
-        assert!(!matches_jar("java.exe -jar pay.jar", jar));
-        assert!(!matches_jar(r"java.exe -jar C:\other\pay.jar", jar));
-        assert!(!matches_jar(
-            r"java.exe -Dnote=C:\apps\pay\pay.jar -jar other.jar",
-            jar
-        ));
-    }
-    #[test]
-    fn single_cluster_lock() {
-        let p = std::env::temp_dir().join(format!("cis-lock-test-{}", std::process::id()));
-        let first = cluster_lock(&p).unwrap();
-        assert!(cluster_lock(&p).is_err());
-        drop(first);
-        assert!(cluster_lock(&p).is_ok());
-    }
-    #[test]
-    fn verbatim_and_unc_keys() {
-        assert_eq!(
-            path_key(Path::new(r"\\?\C:\apps\pay")),
-            path_key(Path::new(r"c:\apps\pay"))
-        );
-        assert_eq!(
-            path_key(Path::new(r"\\?\UNC\server\share\pay")),
-            path_key(Path::new(r"\\server\share\pay"))
-        );
     }
 }

@@ -56,24 +56,15 @@ fn make_icon(png_path: &str, output: &std::path::Path) -> Result<(), Box<dyn std
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=ui/main.slint");
     println!("cargo:rerun-if-changed=assets/jkeeper.png");
-    slint_build::compile_with_config(
-        "ui/main.slint",
-        slint_build::CompilerConfiguration::new().with_style("fluent-dark".into()),
-    )
-    .expect("Slint UI compilation failed");
-
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
+    let icon = out_dir.join("jkeeper.ico");
     if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
-        let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR is set by Cargo"));
-        let icon = out_dir.join("jkeeper.ico");
         make_icon("assets/jkeeper.png", &icon).expect("failed to generate jkeeper.ico");
-        let mut resource = winres::WindowsResource::new();
-        resource.set_icon(icon.to_str().expect("icon path is valid Unicode"));
-        resource.set("FileDescription", "jkeeper Java Cluster Manager");
-        resource.set("ProductName", "jkeeper");
-        resource
-            .compile()
-            .expect("failed to embed jkeeper Windows icon");
     }
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .windows_attributes(tauri_build::WindowsAttributes::new().window_icon_path(icon)),
+    )
+    .expect("failed to run tauri-build");
 }
