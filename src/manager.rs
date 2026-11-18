@@ -22,6 +22,8 @@ pub struct Identity {
 #[derive(Clone, Default)]
 pub struct Status {
     pub identity: Option<Identity>,
+    pub idea_status: Option<IdeaStatus>,
+    pub ambiguous: bool,
     pub uncertain: bool,
     pub note: String,
     pub current_memory: Option<String>,
@@ -33,6 +35,60 @@ pub struct Status {
     pub can_start: bool,
     pub can_update: bool,
     pub can_restart: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum IdeaStatus {
+    Debug,
+    Running,
+}
+
+#[derive(Clone)]
+struct JpsProcess {
+    main_class: String,
+    debugging: bool,
+}
+
+fn jps_processes(java: &Path) -> Result<HashMap<u32, JpsProcess>, String> {
+    let jps = java
+        .parent()
+        .ok_or_else(|| format!("Java 路径无效，无法定位 jps.exe: {}", java.display()))?
+        .join("jps.exe");
+    if !jps.is_file() {
+        return Err(format!("找不到 jps.exe: {}", jps.display()));
+    }
+    let output = Command::new(&jps)
+        .arg("-lv")
+        .creation_flags(0x08000000)
+        .output()
+        .map_err(|error| format!("无法运行 jps -lv: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "jps -lv 执行失败: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut processes = HashMap::new();
+    for line in text.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(pid) = fields.next().and_then(|value| value.parse::<u32>().ok()) else {
+            continue;
+        };
+        let Some(main_class) = fields.next() else {
+            continue;
+        };
+        let debugging =
+            fields.any(|arg| arg.starts_with("-agentlib:jdwp") || arg.starts_with("-Xrunjdwp"));
+        processes.insert(
+            pid,
+            JpsProcess {
+                main_class: main_class.to_string(),
+                debugging,
+            },
+        );
+    }
+    Ok(processes)
 }
 pub fn format_time(t: std::time::SystemTime) -> String {
     let d: chrono::DateTime<chrono::Local> = t.into();
@@ -228,9 +284,52 @@ pub fn scan(c: &Config) -> Vec<Status> {
                 .collect()
         })
         .unwrap_or_default();
+    let managed_matches: Vec<Vec<(Identity, String, String)>> = c
+        .apps
+        .iter()
+        .map(|app| {
+            let jar_key = process::path_key(&c.jar(app));
+            processes
+                .iter()
+                .filter_map(|(pid, info)| {
+                    let info = info.as_ref().ok()?;
+                    (info.jar.as_deref() == Some(jar_key.as_str())).then(|| {
+                        (
+                            Identity {
+                                pid: *pid,
+                                created: info.created,
+                                jar: jar_key.clone(),
+                            },
+                            info.memory.clone(),
+                            info.command.clone(),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    let mut jps_by_java: HashMap<String, Result<HashMap<u32, JpsProcess>, String>> = HashMap::new();
+    if pids.is_ok() {
+        for (index, app) in c.apps.iter().enumerate() {
+            if !app
+                .main_class
+                .as_deref()
+                .is_some_and(|main_class| !main_class.trim().is_empty())
+                || !managed_matches[index].is_empty()
+            {
+                continue;
+            }
+            let java = c.java(app);
+            let key = process::path_key(&java);
+            jps_by_java
+                .entry(key)
+                .or_insert_with(|| jps_processes(&java));
+        }
+    }
     c.apps
         .iter()
-        .map(|a| {
+        .enumerate()
+        .map(|(app_index, a)| {
             let jar = c.jar(a);
             let mut s = Status {
                 started: "—".into(),
@@ -241,7 +340,6 @@ pub fn scan(c: &Config) -> Vec<Status> {
                 s.note = format!("不支持的应用类型: {}", a.app_type);
                 return s;
             }
-            let jar_key = process::path_key(&jar);
             let mut notes = vec![];
             match configured_command(c, a) {
                 Ok(command) => {
@@ -250,22 +348,7 @@ pub fn scan(c: &Config) -> Vec<Status> {
                 }
                 Err(error) => notes.push(error),
             }
-            let mut matches = vec![];
-            for (pid, info) in &processes {
-                if let Ok(info) = info
-                    && info.jar.as_deref() == Some(jar_key.as_str())
-                {
-                    matches.push((
-                        Identity {
-                            pid: *pid,
-                            created: info.created,
-                            jar: jar_key.clone(),
-                        },
-                        info.memory.clone(),
-                        info.command.clone(),
-                    ));
-                }
-            }
+            let matches = &managed_matches[app_index];
             if let Err(e) = &pids {
                 s.uncertain = true;
                 notes.push(e.clone());
@@ -307,6 +390,66 @@ pub fn scan(c: &Config) -> Vec<Status> {
                     notes.push(format!("PID 文件损坏或不可读取: {e}"));
                 }
                 Ok(None) => {}
+            }
+            if s.identity.is_none() && !s.uncertain {
+                if let Some(main_class) = a.main_class.as_deref().map(str::trim)
+                    && !main_class.is_empty()
+                {
+                    let java_key = process::path_key(&c.java(a));
+                    match jps_by_java.get(&java_key) {
+                        Some(Ok(jps_processes)) => {
+                            let matches: Vec<_> = jps_processes
+                                .iter()
+                                .filter(|(_, info)| info.main_class == main_class)
+                                .collect();
+                            if matches.len() > 1 {
+                                s.ambiguous = true;
+                                notes.push(format!(
+                                    "主类 {main_class} 匹配到多个 Java 进程（{} 个），无法唯一识别",
+                                    matches.len()
+                                ));
+                            } else if let Some((pid, jps_info)) = matches.first() {
+                                match processes.get(pid) {
+                                    Some(Ok(info)) => {
+                                        s.current_memory = Some(info.memory.clone());
+                                        s.ports = ports
+                                            .as_ref()
+                                            .ok()
+                                            .and_then(|ports| ports.get(pid))
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        s.idea_status = Some(if jps_info.debugging {
+                                            IdeaStatus::Debug
+                                        } else {
+                                            IdeaStatus::Running
+                                        });
+                                        s.started = "—".into();
+                                        s.jar_time = "—".into();
+                                        s.command_line.clear();
+                                        s.command_source.clear();
+                                    }
+                                    Some(Err(error)) => {
+                                        s.uncertain = true;
+                                        notes.push(format!(
+                                            "找到主类 {main_class} 的 PID {pid}，但无法读取进程信息: {error}"
+                                        ));
+                                    }
+                                    None => {
+                                        s.uncertain = true;
+                                        notes.push(format!(
+                                            "jps 找到主类 {main_class} 的 PID {pid}，但无法确认该进程仍在运行"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                        Some(Err(error)) => {
+                            s.uncertain = true;
+                            notes.push(format!("无法查询 IDEA 主类 {main_class}: {error}"));
+                        }
+                        None => {}
+                    }
+                }
             }
             if let Err(e) = &ports {
                 notes.push(e.clone());

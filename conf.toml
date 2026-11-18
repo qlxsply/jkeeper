@@ -39,6 +39,7 @@ source_files = [
 [[apps]]
 name = 'system'
 type = 'java'
+main_class = 'com.inhe.SystemApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-system\witlink-app-system\target\system.jar',
 ]
@@ -46,6 +47,7 @@ source_files = [
 [[apps]]
 name = 'workorder'
 type = 'java'
+main_class = 'com.witlink.app.WorkOrderApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-workorder\witlink-app-workorder\target\workorder.jar',
 ]
@@ -53,6 +55,7 @@ source_files = [
 [[apps]]
 name = 'crm'
 type = 'java'
+main_class = 'com.witlink.app.crm.CrmApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-crm\witlink-app-crm\target\crm.jar',
 ]
@@ -60,6 +63,7 @@ source_files = [
 [[apps]]
 name = 'tariff'
 type = 'java'
+main_class = 'com.witlink.app.tariff.TariffApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-tariff\witlink-app-tariff\target\tariff.jar',
 ]
@@ -67,6 +71,7 @@ source_files = [
 [[apps]]
 name = 'pay'
 type = 'java'
+main_class = 'com.witlink.app.pay.PayApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-pay\witlink-app-pay\target\pay.jar',
 ]
@@ -75,6 +80,7 @@ java_vm_args = '-Xms64m -Xmx512m'
 [[apps]]
 name = 'postpay'
 type = 'java'
+main_class = 'com.inhe.PostpayApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-postpay\witlink-app-postpay\target\postpay.jar',
 ]
@@ -82,13 +88,23 @@ source_files = [
 [[apps]]
 name = 'prepay'
 type = 'java'
+main_class = 'com.witlink.app.prepay.PrePayApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-prepay\witlink-app-prepay\target\prepay.jar',
 ]
 
 [[apps]]
+name = 'dataWarehouse'
+type = 'java'
+main_class = 'com.witlink.app.warehouse.DataWarehouseApplication'
+source_files = [
+    'D:\Gitlab\cis\witlink-cis-service\witlink-cis-data-warehouse\witlink-app-data-warehouse\target\dataWarehouse.jar',
+]
+
+[[apps]]
 name = 'sts'
 type = 'java'
+main_class = 'com.witlink.app.sts.StsApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-sts\witlink-app-sts\target\sts.jar',
 ]
@@ -96,6 +112,7 @@ source_files = [
 [[apps]]
 name = 'masset'
 type = 'java'
+main_class = 'com.inhe.MassetApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-masset\witlink-app-masset\target\masset.jar',
 ]
@@ -103,6 +120,7 @@ source_files = [
 [[apps]]
 name = 'message'
 type = 'java'
+main_class = 'com.witlink.MessageApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-message\witlink-app-message\target\message.jar',
 ]
@@ -110,6 +128,7 @@ source_files = [
 [[apps]]
 name = 'agent'
 type = 'java'
+main_class = 'com.witlink.app.agent.AgentApplication'
 source_files = [
     'D:\Gitlab\cis\witlink-cis-service\witlink-cis-agent\witlink-app-agent\target\agent.jar',
 ]

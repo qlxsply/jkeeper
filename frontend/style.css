@@ -42,6 +42,9 @@ tbody tr.has-problem td { color: #a45940; }
 .status-running { color: #218451; }
 .status-stopped { color: #7c8797; }
 .status-error { color: #c15b4d; }
+.status-idea-debug { color: #8454b8; }
+.status-idea-running { color: #2873bd; }
+.status-ambiguous { color: #be7a19; }
 .memory { color: #426bc2; font-weight: 600; }
 .actions-head { padding-left: 12px; }
 .actions-cell { overflow: visible; padding-left: 12px; padding-right: 0; }

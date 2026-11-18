@@ -34,12 +34,10 @@ function render(snapshot) {
   document.querySelector('#directory').textContent = snapshot.directory;
   body.innerHTML = rows.length ? rows.map((row, index) => {
     const isSelected = selected.has(index);
-    const state = row.uncertain || row.problem ? '异常' : row.running ? '运行中' : '已停止';
-    const stateClass = row.uncertain || row.problem ? 'status-error' : row.running ? 'status-running' : 'status-stopped';
-    return `<tr data-row="${index}" class="${isSelected ? 'selected ' : ''}${row.problem || row.uncertain ? 'has-problem' : ''}" title="${escapeHtml(row.note)}">
+    return `<tr data-row="${index}" class="${isSelected ? 'selected ' : ''}${row.problem || row.uncertain ? 'has-problem' : ''}${row.status_kind === 'status-ambiguous' ? ' has-ambiguous' : ''}" title="${escapeHtml(row.note)}">
       <td class="check-col"><input type="checkbox" data-select="${index}" aria-label="选择 ${escapeHtml(row.name)}" ${isSelected ? 'checked' : ''} ${busy ? 'disabled' : ''}></td>
       <td class="name-col"><div class="name-content">${escapeHtml(row.name)}</div></td>
-      <td><span class="status-pill ${stateClass}">${state}</span></td>
+      <td><span class="status-pill ${row.status_kind}">${escapeHtml(row.display_status)}</span></td>
       <td>${escapeHtml(row.pid)}</td><td class="memory">${escapeHtml(row.memory)}</td>
       <td title="${escapeHtml(row.ports_full)}">${escapeHtml(row.ports)}</td><td>${escapeHtml(row.started)}</td><td>${escapeHtml(row.updated)}</td>
       <td class="actions-cell"><div class="row-actions">${getActionButtons(row,index)}</div></td>
@@ -90,10 +88,12 @@ function showDetails(index, open = true) {
   if (!row) return;
   dialog.dataset.index = index;
   const fields = [
-    ['应用名称', row.name], ['运行状态', row.uncertain || row.problem ? `异常：${row.note}` : row.running ? '运行中' : '已停止'],
-    ['PID', row.pid], ['内存', row.memory], ['监听端口', row.ports_full],
-    ['启动命令', row.command_line || '—'], ['启动时间', row.started], ['更新时间', row.updated]
+    ['应用名称', row.name], ['运行状态', row.uncertain || row.problem ? `异常：${row.note}` : row.display_status],
+    ['PID', row.pid], ['内存', row.memory], ['监听端口', row.ports_full]
   ];
+  if (!row.external_idea) {
+    fields.push(['启动命令', row.command_line || '—'], ['启动时间', row.started], ['更新时间', row.updated]);
+  }
   document.querySelector('#detail-content').innerHTML = fields.map(([label,value]) => `<div class="detail-row"><div class="detail-label">${escapeHtml(label)}</div><div class="detail-value">${escapeHtml(value)}</div></div>`).join('');
   if (open && !dialog.open) dialog.showModal();
 }

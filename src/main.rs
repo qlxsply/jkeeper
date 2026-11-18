@@ -32,6 +32,9 @@ struct ServiceRow {
     started: String,
     updated: String,
     command_line: String,
+    display_status: String,
+    status_kind: String,
+    external_idea: bool,
     running: bool,
     uncertain: bool,
     problem: bool,
@@ -59,31 +62,50 @@ fn get_snapshot(backend: State<'_, Backend>) -> Snapshot {
         .apps
         .iter()
         .zip(statuses)
-        .map(|(app, status)| ServiceRow {
-            name: app.name.clone(),
-            pid: status
-                .identity
-                .as_ref()
-                .map(|identity| identity.pid.to_string())
-                .unwrap_or_else(|| "—".into()),
-            memory: status.current_memory.unwrap_or_else(|| "—".into()),
-            ports: crate::port_format::table_summary(&status.ports),
-            ports_full: if status.ports.is_empty() {
-                "—".into()
+        .map(|(app, status)| {
+            let (display_status, status_kind) = if status.ambiguous {
+                ("匹配不唯一", "status-ambiguous")
+            } else if status.idea_status == Some(manager::IdeaStatus::Debug) {
+                ("IDEA Debug", "status-idea-debug")
+            } else if status.idea_status == Some(manager::IdeaStatus::Running) {
+                ("IDEA 运行", "status-idea-running")
+            } else if status.uncertain || !status.note.is_empty() {
+                ("异常", "status-error")
+            } else if status.identity.is_some() {
+                ("运行中", "status-running")
             } else {
-                status.ports.join("\n")
-            },
-            started: status.started,
-            updated: status.jar_time,
-            command_line: status.command_line,
-            running: status.identity.is_some(),
-            uncertain: status.uncertain,
-            problem: !status.note.is_empty(),
-            note: status.note,
-            can_start: status.can_start,
-            can_stop: status.identity.is_some() && !status.uncertain,
-            can_restart: status.can_restart,
-            can_update: status.can_update,
+                ("已停止", "status-stopped")
+            };
+            let external_idea = status.idea_status.is_some();
+            ServiceRow {
+                name: app.name.clone(),
+                pid: status
+                    .identity
+                    .as_ref()
+                    .map(|identity| identity.pid.to_string())
+                    .unwrap_or_else(|| "—".into()),
+                memory: status.current_memory.unwrap_or_else(|| "—".into()),
+                ports: crate::port_format::table_summary(&status.ports),
+                ports_full: if status.ports.is_empty() {
+                    "—".into()
+                } else {
+                    status.ports.join("\n")
+                },
+                started: status.started,
+                updated: status.jar_time,
+                command_line: status.command_line,
+                display_status: display_status.into(),
+                status_kind: status_kind.into(),
+                external_idea,
+                running: status.identity.is_some(),
+                uncertain: status.uncertain,
+                problem: !status.note.is_empty() && !external_idea && !status.ambiguous,
+                note: status.note,
+                can_start: status.can_start,
+                can_stop: status.identity.is_some() && !status.uncertain,
+                can_restart: status.can_restart,
+                can_update: status.can_update,
+            }
         })
         .collect();
     Snapshot {

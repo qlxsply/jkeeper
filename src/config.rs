@@ -42,6 +42,8 @@ pub struct App {
     #[serde(rename = "type")]
     pub app_type: String,
     #[serde(default)]
+    pub main_class: Option<String>,
+    #[serde(default)]
     pub source_files: Vec<PathBuf>,
     pub jar_name: Option<String>,
     pub java_path: Option<PathBuf>,

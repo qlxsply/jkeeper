@@ -65,6 +65,10 @@ name = 'pay'
 # 必填。当前可操作类型为 java；未知类型会显示在列表中，但禁用管理操作。
 type = 'java'
 
+# 可选。IDEA 直接运行/Debug 启动时用于识别该 Java 主类；留空或不配置时不做外部进程识别。
+# 如果 jkeeper 未发现自己管理的 JAR 进程，会使用此类名查询对应 JDK 的 jps -lv。
+main_class = 'com.witlink.app.pay.PayApplication'
+
 # Java 必填，必须是绝对路径列表，且列表中必须直接包含至少一个 JAR 文件项。
 # 普通文件复制到应用目录根部；目录会以目录名复制到应用目录并保留其内部结构。
 # 每个来源 basename 必须唯一，避免多个来源写入同一个目标。

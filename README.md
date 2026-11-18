@@ -177,6 +177,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
 
 全局同一时间只允许一个 `jkeeper.exe` 实例运行，不受配置目录影响。重复启动会提示并退出。窗口每次在屏幕中央打开；关闭窗口会直接结束管理器进程，但已启动的 Java 服务继续运行。程序不创建或读取 `jkeeper-window.json`。
 
+每个 `[[apps]]` 可选配置 `main_class = 'com.example.Application'`。jkeeper 优先按原有规则识别自己管理的 JAR；未找到时，若配置了 `main_class`，会通过 `jps -lv` 检查 IDEA 启动的同名 Java 主类，并显示 IDEA Debug 或 IDEA 运行状态，同时读取其 PID、内存和监听端口。此状态仍按“已停止”开放原有操作；如果一个主类匹配到多个 PID，则显示“匹配不唯一”，不选取其中任一进程。该功能需要 `java_path` 所在 JDK 提供 `jps.exe`。
+
 ## 常见检查
 
 - **提示找不到 linker / `link.exe`**：确认已安装 Visual Studio 的 Desktop development with C++、MSVC x64 工具和 Windows SDK；从 Developer PowerShell 运行构建。
