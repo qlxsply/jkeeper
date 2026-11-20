@@ -107,7 +107,7 @@ cargo build --release --locked
 Test-Path .\target\release\jkeeper.exe
 ```
 
-返回 `True` 即表示 Release exe 已生成。它可以在构建电脑上运行，但启动配置由 exe 同目录的 `conf.toml` 决定；只复制 exe 到空目录时不会有可用应用配置。
+返回 `True` 即表示 Release exe 已生成。程序只从 exe 同级目录读取 `conf-<name>.toml` 集群配置；找不到任何匹配文件时会提示错误并退出。仓库根目录的 `conf-default.toml` 是本地调试配置，不会被程序当作 exe 同级配置，打包脚本也不会复制它。
 
 ## 三、打包发布目录
 
@@ -121,7 +121,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
 
 ```powershell
 Test-Path .\release\jkeeper.exe
-Test-Path .\release\conf.toml
+Test-Path .\release\conf-cis-dev-ing.toml
 Test-Path .\release\conf.example.toml
 ```
 
@@ -130,18 +130,20 @@ Test-Path .\release\conf.example.toml
 ```text
 release\
   jkeeper.exe       # 单文件应用程序（内嵌 Tauri 前端）
-  conf.toml
+  conf-cis-dev-ing.toml
+  conf-cis-duv.toml
+  conf-cis-kpz.toml
   conf.example.toml
   README.md
 ```
 
-打包脚本只在 `release\conf.toml` 不存在时复制仓库根目录的 `conf.toml`，不会覆盖已有的目标配置。仓库中的 `conf.toml` 包含本机路径，**发布给其他电脑前应编辑 `release\conf.toml`**，填写目标机的 `manage_dir`、JDK 路径、来源文件绝对路径等设置。
+配置文件名中的 `name` 是下拉框中显示的集群名。打包脚本会把项目根目录的 `conf-<name>.toml` 复制到 `release`，不会覆盖已有的目标配置；不会复制仅供开发调试的 `conf-default.toml`。生产环境必须自行提供至少一个 `conf-<name>.toml`，填写目标机的 `manage_dir`、JDK 路径、来源文件绝对路径等设置。
 
 如正在运行的 `release\jkeeper.exe` 被 Windows 锁定，打包脚本会将新版本输出到 `release\jkeeper.next.exe`。关闭旧版后，用该文件替换 `jkeeper.exe`。
 
 ## 四、清空编译和打包
 
-在项目根目录的 Developer PowerShell 中执行。请先关闭正在运行的 jkeeper，避免 Windows 锁定 exe。下面的命令会删除 Cargo 编译缓存和 `release` 中的旧发布文件，但**保留 `release\conf.toml`**（如果存在），然后重新编译并打包：
+在项目根目录的 Developer PowerShell 中执行。请先关闭正在运行的 jkeeper，避免 Windows 锁定 exe。下面的命令会删除 Cargo 编译缓存和 `release` 中的旧发布文件，但保留已有的集群配置和上次集群记录，然后重新编译并打包：
 
 ```powershell
 cargo clean
@@ -150,7 +152,7 @@ if ($LASTEXITCODE -ne 0) { throw 'cargo clean failed.' }
 $release = Join-Path (Get-Location).Path 'release'
 if (Test-Path -LiteralPath $release) {
     Get-ChildItem -LiteralPath $release |
-        Where-Object { $_.Name -ne 'conf.toml' } |
+        Where-Object { $_.Name -notlike 'conf-*.toml' -and $_.Name -ne 'jkeeper-last-cluster.txt' } |
         Remove-Item -Recurse -Force
 }
 
@@ -161,27 +163,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\package.ps1
 if ($LASTEXITCODE -ne 0) { throw 'Packaging failed.' }
 ```
 
-如果要连同已编辑的发布配置也重新生成，请在上述命令前手动备份 `release\conf.toml`，并在清理块中移除保留它的 `Where-Object` 筛选。打包后将按脚本规则从项目根目录复制 `conf.toml`。
+若需重新生成某个集群配置，请先备份或删除对应的 `release\conf-<name>.toml`，再从项目根目录重新复制或编辑配置。需要重置默认选择时，删除 `release\jkeeper-last-cluster.txt`。
 
 ## 五、在目标电脑运行
 
-`jkeeper.exe` 本身是单文件应用程序，HTML/CSS/JavaScript 前端已内嵌，不需要额外的前端文件、WebView2Loader.dll 或安装包。运行时仍需将 `conf.toml` 放在 exe 同目录；目标机还需要 WebView2 Runtime，以及配置所需的 JDK 和应用文件。至少复制：
+`jkeeper.exe` 本身是单文件应用程序，HTML/CSS/JavaScript 前端已内嵌，不需要额外的前端文件、WebView2Loader.dll 或安装包。exe 同级目录必须至少放置一个 `conf-<name>.toml`；目标机还需要 WebView2 Runtime，以及配置所需的 JDK 和应用文件。至少复制：
 
 ```text
 目标目录\
   jkeeper.exe
-  conf.toml
+  conf-cis-dev-ing.toml
+  conf-cis-duv.toml
 ```
 
-双击 `jkeeper.exe` 启动。程序从 exe 所在目录读取 `conf.toml`，不依赖当前工作目录。要启动 Java 服务，还需确保 `conf.toml` 配置的 JDK `java.exe`、`source_files` 和 `manage_dir` 中的应用文件在目标机实际存在。
+双击 `jkeeper.exe` 启动。程序只从 exe 所在目录读取 `conf-<name>.toml`，不依赖当前工作目录。首次启动或上次配置记录为空/对应文件不存在时，按集群名排序选择第一个配置；选中的配置存在但无效时会报错退出。程序会在 exe 同级目录创建 `jkeeper-last-cluster.txt` 记录上次选择。要启动 Java 服务，还需确保配置中的 JDK `java.exe`、`source_files` 和 `manage_dir` 中的应用文件在目标机实际存在。
 
 全局同一时间只允许一个 `jkeeper.exe` 实例运行，不受配置目录影响。重复启动会提示并退出。窗口每次在屏幕中央打开；关闭窗口会直接结束管理器进程，但已启动的 Java 服务继续运行。程序不创建或读取 `jkeeper-window.json`。
 
 每个 `[[apps]]` 可选配置 `main_class = 'com.example.Application'`。jkeeper 优先按原有规则识别自己管理的 JAR；未找到时，若配置了 `main_class`，会通过 `jps -lv` 检查 IDEA 启动的同名 Java 主类，并显示 IDEA Debug 或 IDEA 运行状态，同时读取其 PID、内存和监听端口。此状态仍按“已停止”开放原有操作；如果一个主类匹配到多个 PID，则显示“匹配不唯一”，不选取其中任一进程。该功能需要 `java_path` 所在 JDK 提供 `jps.exe`。
 
+顶部集群下拉框列出 exe 同级目录中的 `conf-<name>.toml`。切换前目标配置会先加载并验证；若当前集群仍有 jkeeper 管理的应用运行，切换会被禁止。IDEA 或其他方式启动的进程不阻止切换。切换成功后应用立即使用新配置；关闭并重启后恢复上次使用的集群。
+
 ## 常见检查
 
 - **提示找不到 linker / `link.exe`**：确认已安装 Visual Studio 的 Desktop development with C++、MSVC x64 工具和 Windows SDK；从 Developer PowerShell 运行构建。
-- **提示找不到 `conf.toml`**：将 `conf.toml` 放到 `jkeeper.exe` 同目录；文件名必须是 `conf.toml`。
+- **提示找不到集群配置**：将至少一个 `conf-<name>.toml` 放到 `jkeeper.exe` 同目录；例如 `conf-cis-dev-ing.toml`。
 - **配置解析失败**：检查 TOML 语法；VS Code 可通过 `.toml` 扩展名提供语法高亮和格式化。
 - **Java 应用启动失败**：确认目标机已安装配置所需的 JDK，`java_path` 指向存在的 `java.exe`。

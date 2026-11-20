@@ -11,7 +11,10 @@
   <main class="layout">
     <section class="panel">
       <div class="panel-heading">
-        <p class="directory" id="directory">正在读取管理目录…</p>
+        <div class="cluster-location">
+          <select id="cluster-selector" aria-label="选择集群配置"></select>
+          <p class="directory" id="directory" title="双击打开管理目录">正在读取管理目录…</p>
+        </div>
         <div class="bulk-actions">
           <button class="button button-outline" id="refresh"><span class="refresh-icon">↻</span> 刷新状态</button>
           <button class="button button-success" data-bulk="start" disabled>启动选中</button>

@@ -9,15 +9,38 @@ mod process;
 mod scheduler;
 
 use serde::Serialize;
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+use std::{
+    fs::{self, OpenOptions},
+    io::Write,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{
+        Arc, Mutex, RwLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use tauri::{Emitter, State};
 
+const LAST_CLUSTER_FILE: &str = "jkeeper-last-cluster.txt";
+
+#[derive(Clone)]
+struct ClusterFile {
+    name: String,
+    path: PathBuf,
+}
+
+#[derive(Clone)]
+struct ActiveCluster {
+    name: String,
+    config: Arc<config::Config>,
+}
+
 struct Backend(Arc<BackendInner>);
 struct BackendInner {
-    config: Arc<config::Config>,
+    base_dir: PathBuf,
+    clusters: Vec<ClusterFile>,
+    active: RwLock<ActiveCluster>,
+    operation_gate: Mutex<()>,
     busy: AtomicBool,
     status: Mutex<String>,
 }
@@ -51,13 +74,120 @@ struct Snapshot {
     directory: String,
     status: String,
     busy: bool,
+    can_switch_cluster: bool,
+    clusters: Vec<String>,
+    cluster_name: String,
+}
+
+fn discover_clusters(base_dir: &Path) -> Result<Vec<ClusterFile>, String> {
+    let entries = fs::read_dir(base_dir)
+        .map_err(|error| format!("无法扫描集群配置目录 {}: {error}", base_dir.display()))?;
+    let mut clusters = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("读取配置目录条目失败: {error}"))?;
+        if !entry
+            .file_type()
+            .map_err(|error| format!("读取配置文件类型失败: {error}"))?
+            .is_file()
+        {
+            continue;
+        }
+        let Some(filename) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(name) = filename
+            .strip_prefix("conf-")
+            .and_then(|tail| tail.strip_suffix(".toml"))
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        clusters.push(ClusterFile {
+            name: name.to_owned(),
+            path: entry.path(),
+        });
+    }
+    clusters.sort_by(|left, right| {
+        left.name
+            .to_ascii_lowercase()
+            .cmp(&right.name.to_ascii_lowercase())
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    if clusters.is_empty() {
+        return Err(format!(
+            "在 {} 中没有找到集群配置文件（conf-<name>.toml）",
+            base_dir.display()
+        ));
+    }
+    Ok(clusters)
+}
+
+fn write_last_cluster(base_dir: &Path, name: &str) -> Result<(), String> {
+    let target = base_dir.join(LAST_CLUSTER_FILE);
+    let temp = base_dir.join(format!("{LAST_CLUSTER_FILE}.{}.tmp", std::process::id()));
+    let mut created = false;
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp)
+            .map_err(|error| format!("创建集群记录临时文件失败: {error}"))?;
+        created = true;
+        file.write_all(name.as_bytes())
+            .map_err(|error| format!("写入集群记录失败: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("同步集群记录失败: {error}"))?;
+        drop(file);
+        process::replace(&temp, &target)
+    })();
+    if result.is_err() && created {
+        let _ = fs::remove_file(temp);
+    }
+    result
+}
+
+fn select_startup_cluster(
+    base_dir: &Path,
+    clusters: &[ClusterFile],
+) -> Result<(ClusterFile, Arc<config::Config>), String> {
+    let marker_path = base_dir.join(LAST_CLUSTER_FILE);
+    let saved_name = match fs::read_to_string(&marker_path) {
+        Ok(value) => value.trim().to_owned(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("读取上次集群记录失败: {error}")),
+    };
+    let selected = if saved_name.is_empty() {
+        None
+    } else {
+        clusters.iter().find(|cluster| cluster.name == saved_name)
+    };
+    let (cluster, update_marker) = match selected {
+        Some(cluster) => (cluster.clone(), false),
+        None => (clusters[0].clone(), true),
+    };
+    let config = config::Config::load(&cluster.path)
+        .map_err(|error| format!("加载集群配置 {} 失败: {error}", cluster.path.display()))?;
+    if update_marker {
+        write_last_cluster(base_dir, &cluster.name)?;
+    }
+    Ok((cluster, Arc::new(config)))
 }
 
 #[tauri::command]
-fn get_snapshot(backend: State<'_, Backend>) -> Snapshot {
-    let statuses = manager::scan(&backend.0.config);
-    let rows = backend
+fn get_snapshot(backend: State<'_, Backend>) -> Result<Snapshot, String> {
+    let active = backend
         .0
+        .active
+        .read()
+        .map_err(|_| "当前集群配置锁异常".to_string())?
+        .clone();
+    let statuses = manager::scan(&active.config);
+    let busy = backend.0.busy.load(Ordering::Acquire);
+    let can_switch_cluster = !busy
+        && statuses
+            .iter()
+            .all(|status| status.identity.is_none() && !status.process_scan_failed);
+    let rows = active
         .config
         .apps
         .iter()
@@ -83,6 +213,7 @@ fn get_snapshot(backend: State<'_, Backend>) -> Snapshot {
                     .identity
                     .as_ref()
                     .map(|identity| identity.pid.to_string())
+                    .or_else(|| status.external_pid.map(|pid| pid.to_string()))
                     .unwrap_or_else(|| "—".into()),
                 memory: status.current_memory.unwrap_or_else(|| "—".into()),
                 ports: crate::port_format::table_summary(&status.ports),
@@ -108,17 +239,102 @@ fn get_snapshot(backend: State<'_, Backend>) -> Snapshot {
             }
         })
         .collect();
-    Snapshot {
+    Ok(Snapshot {
         rows,
-        directory: backend.0.config.general.manage_dir.display().to_string(),
+        directory: active.config.general.manage_dir.display().to_string(),
         status: backend
             .0
             .status
             .lock()
             .map(|value| value.clone())
             .unwrap_or_else(|_| "状态不可用".into()),
-        busy: backend.0.busy.load(Ordering::Acquire),
+        busy,
+        can_switch_cluster,
+        clusters: backend
+            .0
+            .clusters
+            .iter()
+            .map(|cluster| cluster.name.clone())
+            .collect(),
+        cluster_name: active.name,
+    })
+}
+
+#[tauri::command]
+fn switch_cluster(
+    app: tauri::AppHandle,
+    backend: State<'_, Backend>,
+    name: String,
+) -> Result<(), String> {
+    let _gate = backend
+        .0
+        .operation_gate
+        .lock()
+        .map_err(|_| "集群切换锁异常".to_string())?;
+    if backend.0.busy.load(Ordering::Acquire) {
+        return Err("管理任务正在执行，暂时不能切换集群".into());
     }
+    let target = backend
+        .0
+        .clusters
+        .iter()
+        .find(|cluster| cluster.name == name)
+        .cloned()
+        .ok_or_else(|| format!("找不到集群配置: {name}"))?;
+    let current = backend
+        .0
+        .active
+        .read()
+        .map_err(|_| "当前集群配置锁异常".to_string())?
+        .clone();
+    if current.name == target.name {
+        return Ok(());
+    }
+
+    let new_config = Arc::new(
+        config::Config::load(&target.path)
+            .map_err(|error| format!("加载集群配置 {} 失败: {error}", target.path.display()))?,
+    );
+    match manager::has_managed_running_process(&current.config)? {
+        true => return Err("当前集群仍有 jkeeper 管理的应用正在运行，停止全部应用后再切换".into()),
+        false => {}
+    }
+    let mut active = backend
+        .0
+        .active
+        .write()
+        .map_err(|_| "当前集群配置锁异常".to_string())?;
+    write_last_cluster(&backend.0.base_dir, &target.name)?;
+    *active = ActiveCluster {
+        name: target.name.clone(),
+        config: new_config,
+    };
+    if let Ok(mut status) = backend.0.status.lock() {
+        *status = format!("已切换到集群 {}", target.name);
+    }
+    let _ = app.emit("jkeeper-updated", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn open_manage_directory(backend: State<'_, Backend>) -> Result<(), String> {
+    let directory = backend
+        .0
+        .active
+        .read()
+        .map_err(|_| "当前集群配置锁异常".to_string())?
+        .config
+        .general
+        .manage_dir
+        .clone();
+    if !directory.is_dir() {
+        return Err(format!("管理目录不存在: {}", directory.display()));
+    }
+    Command::new("explorer.exe")
+        .arg(&directory)
+        .spawn()
+        .map_err(|error| format!("无法打开管理目录: {error}"))?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -137,21 +353,35 @@ fn perform_action(
     if indices.is_empty() {
         return Err("请先选择应用".into());
     }
+    let gate = backend
+        .0
+        .operation_gate
+        .lock()
+        .map_err(|_| "集群切换锁异常".to_string())?;
+    if backend.0.busy.load(Ordering::Acquire) {
+        return Err("已有管理任务正在执行".into());
+    }
+    let active = backend
+        .0
+        .active
+        .read()
+        .map_err(|_| "当前集群配置锁异常".to_string())?
+        .clone();
     if indices
         .iter()
-        .any(|index| *index >= backend.0.config.apps.len())
+        .any(|index| *index >= active.config.apps.len())
     {
         return Err("应用索引无效".into());
     }
-    if backend
+    backend
         .0
         .busy
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .is_err()
-    {
-        return Err("已有管理任务正在执行".into());
-    }
+        .map_err(|_| "已有管理任务正在执行".to_string())?;
+    drop(gate);
+
     let inner = backend.0.clone();
+    let config = active.config;
     if let Ok(mut status) = inner.status.lock() {
         *status = format!("正在执行 {}", action_label(&action));
     }
@@ -162,10 +392,10 @@ fn perform_action(
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 if action == "log" {
                     for index in indices {
-                        let message = manager::open_app_folder(&inner.config, index)
-                            .unwrap_or_else(|error| error);
+                        let message =
+                            manager::open_app_folder(&config, index).unwrap_or_else(|error| error);
                         if let Ok(mut status) = inner.status.lock() {
-                            *status = format!("{}：{message}", inner.config.apps[index].name);
+                            *status = format!("{}：{message}", config.apps[index].name);
                         }
                     }
                 } else {
@@ -173,11 +403,11 @@ fn perform_action(
                     indices.sort_unstable();
                     scheduler::run_batch(
                         indices,
-                        |index| manager::execute(&inner.config, index, &action),
+                        |index| manager::execute(&config, index, &action),
                         |index, outcome| {
                             let message = outcome.unwrap_or_else(|error| format!("失败：{error}"));
                             if let Ok(mut status) = inner.status.lock() {
-                                *status = format!("{}：{message}", inner.config.apps[index].name);
+                                *status = format!("{}：{message}", config.apps[index].name);
                             }
                         },
                     );
@@ -215,35 +445,39 @@ fn main() {
     }
 }
 
-fn run() -> Result<(), Box<dyn std::error::Error>> {
+fn run() -> Result<(), String> {
     let logging = logging::init();
-    let exe = std::env::current_exe()?;
-    let base = exe.parent().ok_or("无法确定 jkeeper.exe 所在目录")?;
-    let config = match config::Config::load(&base.join("conf.toml")) {
-        Ok(config) => Arc::new(config),
-        Err(error) => {
-            process::show_startup_error(&format!("{error}\n请修正 conf.toml 后重新启动 jkeeper。"));
-            return Ok(());
-        }
-    };
-    let _instance_lock = match process::global_instance_lock() {
-        Ok(lock) => lock,
-        Err(error) => {
-            process::show_startup_error(&format!("{error}\njkeeper 将退出。"));
-            return Ok(());
-        }
-    };
+    let exe = std::env::current_exe().map_err(|error| error.to_string())?;
+    let base_dir = exe
+        .parent()
+        .ok_or_else(|| "无法确定 jkeeper.exe 所在目录".to_string())?
+        .to_path_buf();
+    let clusters = discover_clusters(&base_dir)?;
+    let (selected, config) = select_startup_cluster(&base_dir, &clusters)?;
+    let _instance_lock = process::global_instance_lock()?;
     if let Err(error) = logging {
         tracing::error!("管理器日志不可用: {error}");
     }
     let backend = Backend(Arc::new(BackendInner {
-        config,
+        base_dir,
+        clusters,
+        active: RwLock::new(ActiveCluster {
+            name: selected.name,
+            config,
+        }),
+        operation_gate: Mutex::new(()),
         busy: AtomicBool::new(false),
         status: Mutex::new("监控中".into()),
     }));
     tauri::Builder::default()
         .manage(backend)
-        .invoke_handler(tauri::generate_handler![get_snapshot, perform_action])
-        .run(tauri::generate_context!())?;
+        .invoke_handler(tauri::generate_handler![
+            get_snapshot,
+            switch_cluster,
+            open_manage_directory,
+            perform_action
+        ])
+        .run(tauri::generate_context!())
+        .map_err(|error| error.to_string())?;
     Ok(())
 }

@@ -1,5 +1,6 @@
-# jkeeper 配置
-# conf 与程序 exe 放在同一目录。所有应用由 [[apps]] 明确列出。
+# jkeeper 本地调试用默认集群配置（仅供在项目根目录启动时使用）
+# 本地调试时，将此文件复制到 exe 同级目录并命名为 conf-default.toml。
+# 所有应用由 [[apps]] 明确列出。
 # Windows 路径使用单引号；java_path 与 source_files 必须是绝对路径。
 
 [general]

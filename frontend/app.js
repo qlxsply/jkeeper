@@ -5,10 +5,12 @@ let rows = [];
 let busy = false;
 let lastSnapshot = null;
 let toastTimer;
+let refreshSequence = 0;
 
 const body = document.querySelector('#service-rows');
 const statusNode = document.querySelector('#status');
 const dialog = document.querySelector('#detail-dialog');
+const clusterSelector = document.querySelector('#cluster-selector');
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 
 function notify(message) {
@@ -31,7 +33,19 @@ function render(snapshot) {
   lastSnapshot = snapshot;
   rows = snapshot.rows;
   busy = snapshot.busy;
-  document.querySelector('#directory').textContent = snapshot.directory;
+  const clusterNames = JSON.stringify(snapshot.clusters);
+  if (clusterSelector.dataset.clusterNames !== clusterNames) {
+    clusterSelector.innerHTML = snapshot.clusters.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+    clusterSelector.dataset.clusterNames = clusterNames;
+  }
+  if (clusterSelector.value !== snapshot.cluster_name) clusterSelector.value = snapshot.cluster_name;
+  clusterSelector.disabled = !snapshot.can_switch_cluster || snapshot.clusters.length < 2;
+  clusterSelector.title = clusterSelector.disabled && snapshot.clusters.length > 1
+    ? (busy ? '管理任务正在执行' : '停止当前集群所有 jkeeper 管理的应用后才能切换')
+    : '切换集群';
+  const directory = document.querySelector('#directory');
+  directory.textContent = snapshot.directory;
+  directory.title = `${snapshot.directory}\n双击在文件资源管理器中打开`;
   body.innerHTML = rows.length ? rows.map((row, index) => {
     const isSelected = selected.has(index);
     return `<tr data-row="${index}" class="${isSelected ? 'selected ' : ''}${row.problem || row.uncertain ? 'has-problem' : ''}${row.status_kind === 'status-ambiguous' ? ' has-ambiguous' : ''}" title="${escapeHtml(row.note)}">
@@ -68,8 +82,27 @@ function render(snapshot) {
 function selectedIndices() { return [...selected].filter(index => index >= 0 && index < rows.length).sort((a,b) => a-b); }
 
 async function refresh() {
-  try { render(await invoke('get_snapshot')); }
+  const sequence = ++refreshSequence;
+  try {
+    const snapshot = await invoke('get_snapshot');
+    if (sequence === refreshSequence) render(snapshot);
+  }
   catch (error) { statusNode.textContent = `连接失败：${error}`; }
+}
+
+async function changeCluster(name) {
+  if (!name || name === lastSnapshot?.cluster_name) return;
+  clusterSelector.disabled = true;
+  try {
+    await invoke('switch_cluster', { name });
+    selected.clear();
+    if (dialog.open) dialog.close();
+    refreshSequence++;
+    await refresh();
+  } catch (error) {
+    notify(String(error));
+    await refresh();
+  }
 }
 
 async function runAction(indices, action) {
@@ -132,6 +165,11 @@ document.querySelector('#select-all').addEventListener('change', event => {
 });
 document.querySelectorAll('[data-bulk]').forEach(button => button.addEventListener('click', () => runAction(selectedIndices(), button.dataset.bulk)));
 document.querySelector('#refresh').addEventListener('click', refresh);
+clusterSelector.addEventListener('change', event => changeCluster(event.target.value));
+document.querySelector('#directory').addEventListener('dblclick', async () => {
+  try { await invoke('open_manage_directory'); }
+  catch (error) { notify(String(error)); }
+});
 document.querySelector('#close-detail').addEventListener('click', () => dialog.close());
 dialog.addEventListener('click', event => { if (event.target === dialog) dialog.close(); });
 listen('jkeeper-updated', refresh);

@@ -15,10 +15,18 @@ try {
     Copy-Item -LiteralPath $exe -Destination (Join-Path $release 'jkeeper.next.exe') -Force
     Write-Warning 'jkeeper.exe is currently running. Close it, then replace it with jkeeper.next.exe.'
 }
-# Preserve a user-edited new-format config; seed it from the repository if absent.
-if (!(Test-Path -LiteralPath (Join-Path $release 'conf.toml'))) {
-    Copy-Item -LiteralPath (Join-Path $root 'conf.toml') -Destination (Join-Path $release 'conf.toml')
-}
+# The project-only debug config is never published as a production cluster.
+Remove-Item -LiteralPath (Join-Path $release 'conf.toml') -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $release 'conf-default.toml') -Force -ErrorAction SilentlyContinue
+# Copy named cluster configs from the project root, preserving any release-specific edits.
+Get-ChildItem -LiteralPath $root -File -Filter 'conf-*.toml' |
+    Where-Object { $_.Name -ne 'conf-default.toml' } |
+    ForEach-Object {
+        $destination = Join-Path $release $_.Name
+        if (!(Test-Path -LiteralPath $destination)) {
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+        }
+    }
 Copy-Item -LiteralPath (Join-Path $root 'conf.example.toml') -Destination $release
 Copy-Item -LiteralPath (Join-Path $root 'README.md') -Destination $release
 Write-Output "Packaged: $release"

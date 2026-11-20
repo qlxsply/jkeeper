@@ -22,8 +22,10 @@ pub struct Identity {
 #[derive(Clone, Default)]
 pub struct Status {
     pub identity: Option<Identity>,
+    pub external_pid: Option<u32>,
     pub idea_status: Option<IdeaStatus>,
     pub ambiguous: bool,
+    pub process_scan_failed: bool,
     pub uncertain: bool,
     pub note: String,
     pub current_memory: Option<String>,
@@ -351,6 +353,7 @@ pub fn scan(c: &Config) -> Vec<Status> {
             let matches = &managed_matches[app_index];
             if let Err(e) = &pids {
                 s.uncertain = true;
+                s.process_scan_failed = true;
                 notes.push(e.clone());
             }
             if matches.len() > 1 {
@@ -411,6 +414,7 @@ pub fn scan(c: &Config) -> Vec<Status> {
                             } else if let Some((pid, jps_info)) = matches.first() {
                                 match processes.get(pid) {
                                     Some(Ok(info)) => {
+                                        s.external_pid = Some(**pid);
                                         s.current_memory = Some(info.memory.clone());
                                         s.ports = ports
                                             .as_ref()
@@ -473,6 +477,64 @@ pub fn scan(c: &Config) -> Vec<Status> {
         })
         .collect()
 }
+
+/// Check only processes running the JARs in this configuration; IDEA main-class matches
+/// are deliberately ignored when guarding cluster changes.
+pub fn has_managed_running_process(c: &Config) -> Result<bool, String> {
+    let pids = process::java_pids()?;
+    let jars: std::collections::HashSet<String> = c
+        .apps
+        .iter()
+        .map(|app| process::path_key(&c.jar(app)))
+        .collect();
+    let mut recorded = HashMap::new();
+    for app in &c.apps {
+        let identity = read_identity(&c.pid(app))
+            .map_err(|error| format!("无法读取 {} 的 PID 记录: {error}", app.name))?;
+        if let Some(identity) = identity
+            && jars.contains(&identity.jar)
+        {
+            recorded.insert(identity.pid, identity);
+        }
+    }
+    for pid in pids {
+        let handle = match process::open(pid, false) {
+            Ok(handle) => handle,
+            Err(error) if recorded.contains_key(&pid) => {
+                return Err(format!("无法核实 jkeeper 管理的 PID {pid}: {error}"));
+            }
+            Err(_) => continue,
+        };
+        if !process::alive(&handle) {
+            continue;
+        }
+        let created = match process::creation(&handle) {
+            Ok(created) => created,
+            Err(error) if recorded.contains_key(&pid) => {
+                return Err(format!("无法核实 jkeeper 管理的 PID {pid}: {error}"));
+            }
+            Err(_) => continue,
+        };
+        if recorded
+            .get(&pid)
+            .is_some_and(|identity| identity.created == created)
+        {
+            return Ok(true);
+        }
+        let command_line = match process::command_line(&handle) {
+            Ok(command_line) => command_line,
+            Err(error) if recorded.contains_key(&pid) => {
+                return Err(format!("无法核实 jkeeper 管理的 PID {pid}: {error}"));
+            }
+            Err(_) => continue,
+        };
+        if process::jar_key(&command_line).is_some_and(|jar| jars.contains(&jar)) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 fn current(c: &Config, index: usize) -> Status {
     scan(c).remove(index)
 }
